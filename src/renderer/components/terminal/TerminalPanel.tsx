@@ -165,7 +165,7 @@ export const TerminalPanel: React.FC = () => {
       cursorBlink: true,
       cursorStyle: 'block',
       scrollback: 5000,
-      convertEol: false,
+      convertEol: true,
       allowProposedApi: true,
     });
 
@@ -178,15 +178,24 @@ export const TerminalPanel: React.FC = () => {
     term.loadAddon(searchAddon);
 
     term.open(containerRef.current);
-    fitAddon.fit();
 
     xtermRef.current = term;
     fitAddonRef.current = fitAddon;
     searchAddonRef.current = searchAddon;
 
+    // Fit after the browser has painted so the container has its final size.
+    // A double-rAF ensures Electron's WebContents has finished its layout pass.
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        fitAddon.fit();
+        setDimensions(term.cols, term.rows);
+        // Sync the PTY with the fitted dimensions immediately
+        window.electronAPI.ssh.resize(term.cols, term.rows);
+      });
+    });
+
     // Expose to store so useSSH can write data
     setTerminal(term);
-    setDimensions(term.cols, term.rows);
 
     // Forward keyboard input to SSH PTY
     term.onData((data) => {
@@ -211,33 +220,27 @@ export const TerminalPanel: React.FC = () => {
     term.writeln('\x1b[2m  Connect to a server to begin.\x1b[0m');
     term.writeln('');
 
+    // ResizeObserver — attach here (after fitAddon is ready) so fit() is
+    // always called with a valid addon reference when the panel resizes.
+    const ro = new ResizeObserver(() => {
+      try { fitAddon.fit(); } catch { /* ignore unmount races */ }
+    });
+    ro.observe(containerRef.current);
+    resizeObserverRef.current = ro;
+
     return () => {
+      ro.disconnect();
+      resizeObserverRef.current = null;
       unsubSSHData();
       setTerminal(null);
-      resizeObserverRef.current?.disconnect();
       term.dispose();
       xtermRef.current = null;
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // ── ResizeObserver: keep xterm fitted to container ───────────────────────
-  useEffect(() => {
-    if (!containerRef.current || !fitAddonRef.current) return;
-
-    const ro = new ResizeObserver(() => {
-      try {
-        fitAddonRef.current?.fit();
-      } catch {
-        // Ignore race-condition errors during unmount
-      }
-    });
-
-    ro.observe(containerRef.current);
-    resizeObserverRef.current = ro;
-
-    return () => ro.disconnect();
-  }, []);
+  // ❌ REMOVED — duplicate ResizeObserver useEffect was here.
+  //    The single ResizeObserver in the mount effect above is sufficient.
 
   // ── Disconnect banner ────────────────────────────────────────────────────
   useEffect(() => {
@@ -366,11 +369,11 @@ export const TerminalPanel: React.FC = () => {
       )}
 
       {/* ── xterm.js mount point ──────────────────────────────────────── */}
+      {/* Use position:absolute so FitAddon measures exact pixel
+          dimensions — no ambiguity from percentage widths.          */}
       <div
-        ref={containerRef}
         className="flex-1 overflow-hidden"
-        style={{ padding: '4px 6px' }}
-        // Allow Ctrl+Shift+C/V / Ctrl+Shift+F shortcuts
+        style={{ position: 'relative' }}
         onKeyDown={(e) => {
           if (e.ctrlKey && e.shiftKey) {
             if (e.key === 'C') { e.preventDefault(); handleCopy(); }
@@ -378,7 +381,19 @@ export const TerminalPanel: React.FC = () => {
             if (e.key === 'F') { e.preventDefault(); handleToggleSearch(); }
           }
         }}
-      />
+      >
+        <div
+          ref={containerRef}
+          style={{
+            position: 'absolute',
+            top: 4,
+            left: 6,
+            right: 6,
+            bottom: 4,
+            textAlign: 'left',
+          }}
+        />
+      </div>
     </div>
   );
 };

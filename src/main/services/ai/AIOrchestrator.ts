@@ -8,17 +8,21 @@ function uuidv4(): string {
 }
 import { IPC_CHANNELS } from '@shared/constants/ipcChannels';
 import { moonshotProvider } from './providers/MoonshotProvider';
+import { openaiProvider } from './providers/OpenAIProvider';
 import { contextBuilder } from './ContextBuilder';
+import { storePlan } from '../../ipc/plan.handler';
 import { AIContext } from './AIContext';
 import { BASE_SYSTEM_PROMPT, STEP_EVALUATION_PROMPT } from './prompts/systemPrompt';
 import type { ChatMessage, ExecutionPlan, OSInfo, ActiveConnection } from '@shared/types';
 import type { CommandResult, StepAssessment } from '@shared/types/execution';
 import type { LLMMessage, LLMProvider, LLMResponse, LLMStreamHandler } from './providers/LLMProvider';
 
+import type { ExecutionMode } from '@shared/types';
+
 interface ChatInput {
   connection: ActiveConnection;
   osInfo: OSInfo;
-  mode: 'fixer' | 'teacher';
+  mode: ExecutionMode;
   sessionHistory: ChatMessage[];
 }
 
@@ -45,6 +49,18 @@ export class AIOrchestrator {
     return this.provider.isInitialized();
   }
 
+  /**
+   * Switch between named providers at runtime (e.g. when settings change).
+   * The selected provider must still be initialized with an API key separately.
+   */
+  setProvider(name: string): void {
+    if (name === 'openai') {
+      this.provider = openaiProvider;
+    } else {
+      this.provider = moonshotProvider;
+    }
+  }
+
   getSessionTokensUsed(): number {
     return this.sessionTokensUsed;
   }
@@ -68,6 +84,19 @@ export class AIOrchestrator {
       throw new Error('AI not initialized. Please set your API key in Settings.');
     }
     const systemPrompt = aiContext.toSystemPrompt(BASE_SYSTEM_PROMPT);
+    const response = await this.provider.sendMessage(systemPrompt, messages);
+    this.sessionTokensUsed += response.usage.inputTokens + response.usage.outputTokens;
+    return response;
+  }
+
+  /**
+   * Direct AI call with a fully custom system prompt — bypasses AIContext.
+   * Used by AgentBrain and AgentContext summarizer which have their own prompts.
+   */
+  async callRaw(systemPrompt: string, messages: LLMMessage[]): Promise<LLMResponse> {
+    if (!this.provider.isInitialized()) {
+      throw new Error('AI not initialized. Please set your API key in Settings.');
+    }
     const response = await this.provider.sendMessage(systemPrompt, messages);
     this.sessionTokensUsed += response.usage.inputTokens + response.usage.outputTokens;
     return response;
@@ -170,8 +199,10 @@ export class AIOrchestrator {
           this.isProcessing = false;
           this.sessionTokensUsed += response.usage.inputTokens + response.usage.outputTokens;
 
-          const plan = this.extractPlan(response.content);
+          const plan = this.extractPlan(response.content, input.mode);
           if (plan) {
+            // Register the plan on the main side for execution before sending to renderer
+            storePlan(plan);
             this.sendToRenderer(IPC_CHANNELS.PLAN.GENERATED, plan);
           }
 
@@ -204,7 +235,7 @@ export class AIOrchestrator {
 
   // ── Helpers ───────────────────────────────────────────────────────
 
-  private extractPlan(content: string): ExecutionPlan | null {
+  private extractPlan(content: string, mode?: ExecutionMode): ExecutionPlan | null {
     try {
       const jsonMatch = content.match(/```json\s*([\s\S]*?)\s*```/);
       if (!jsonMatch) return null;
@@ -216,6 +247,7 @@ export class AIOrchestrator {
         id: uuidv4(),
         goal: parsed.goal ?? 'Unnamed plan',
         successCriteria: parsed.successCriteria ?? [],
+        mode: mode ?? 'planner',
         steps: parsed.steps.map((step: any, index: number) => ({
           id: uuidv4(),
           index,

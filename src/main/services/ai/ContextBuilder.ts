@@ -1,4 +1,4 @@
-import type { OSInfo, ActiveConnection, ChatMessage } from '@shared/types';
+import type { OSInfo, ActiveConnection, ChatMessage, ExecutionMode } from '@shared/types';
 import { AIContext } from './AIContext';
 
 /**
@@ -42,7 +42,7 @@ export class ContextBuilder {
   buildChatContext(input: {
     connection: ActiveConnection;
     osInfo: OSInfo;
-    mode: 'fixer' | 'teacher';
+    mode: ExecutionMode;
     sessionHistory: ChatMessage[];
   }): AIContext {
     const ctx = new AIContext();

@@ -8,7 +8,8 @@ import { IPC_CHANNELS } from '@shared/constants';
 import { sshManager } from '../services/ssh/SSHManager';
 import { OSDetector } from '../services/ssh/OSDetector';
 import { connectionStore } from '../services/storage/ConnectionStore';
-import type { ConnectionConfig } from '@shared/types';
+import { setPlanConnectionContext } from './plan.handler';
+import type { ConnectionConfig, ActiveConnection } from '@shared/types';
 
 export function registerSSHHandlers(mainWindow: BrowserWindow): void {
   sshManager.setMainWindow(mainWindow);
@@ -54,6 +55,20 @@ export function registerSSHHandlers(mainWindow: BrowserWindow): void {
         if (config.connectionId) {
           await connectionStore.updateLastConnected(config.connectionId);
         }
+
+        // Cache connection context for plan execution
+        const connectionId = config.connectionId ?? `${config.host}:${config.port}`;
+        const activeConn: ActiveConnection = {
+          connectionId,
+          name: config.connectionId ?? config.host,
+          host: config.host,
+          port: config.port,
+          username: config.username,
+          status: 'connected',
+          connectedAt: new Date().toISOString(),
+          osInfo,
+        };
+        setPlanConnectionContext({ connection: activeConn, osInfo, connectionId });
         
         // Send connected event with OS info
         mainWindow.webContents.send(IPC_CHANNELS.SSH.CONNECTED, osInfo);

@@ -9,6 +9,7 @@ import type {
   PlanStep,
   ChatSession,
   AppSettings,
+  ExecutionMode,
 } from '../shared/types';
 
 // Type-safe API exposed to renderer
@@ -74,16 +75,26 @@ const electronAPI = {
   
   // Plan Operations
   plan: {
+    execute: (planId: string, mode: ExecutionMode) =>
+      ipcRenderer.invoke(IPC_CHANNELS.PLAN.EXECUTE, planId, mode),
     approve: (stepId: string) =>
-      ipcRenderer.send(IPC_CHANNELS.PLAN.APPROVE, stepId),
+      ipcRenderer.send(IPC_CHANNELS.PLAN.APPROVAL_RESPONSE, { decision: 'approve', stepId }),
     reject: (stepId: string) =>
-      ipcRenderer.send(IPC_CHANNELS.PLAN.REJECT, stepId),
+      ipcRenderer.send(IPC_CHANNELS.PLAN.APPROVAL_RESPONSE, { decision: 'reject', stepId }),
+    skip: (stepId: string) =>
+      ipcRenderer.send(IPC_CHANNELS.PLAN.APPROVAL_RESPONSE, { decision: 'skip', stepId }),
     pause: () =>
       ipcRenderer.send(IPC_CHANNELS.PLAN.PAUSE),
     resume: () =>
       ipcRenderer.send(IPC_CHANNELS.PLAN.RESUME),
     cancel: () =>
       ipcRenderer.send(IPC_CHANNELS.PLAN.CANCEL),
+    /** Subscribe to the PlanEvent stream */
+    onEvent: (callback: (event: any) => void) => {
+      const handler = (_: any, event: any) => callback(event);
+      ipcRenderer.on(IPC_CHANNELS.PLAN.EVENT, handler);
+      return () => ipcRenderer.removeListener(IPC_CHANNELS.PLAN.EVENT, handler);
+    },
     onGenerated: (callback: (plan: ExecutionPlan) => void) => {
       const handler = (_: any, plan: ExecutionPlan) => callback(plan);
       ipcRenderer.on(IPC_CHANNELS.PLAN.GENERATED, handler);
@@ -94,8 +105,8 @@ const electronAPI = {
       ipcRenderer.on(IPC_CHANNELS.PLAN.STEP_UPDATE, handler);
       return () => ipcRenderer.removeListener(IPC_CHANNELS.PLAN.STEP_UPDATE, handler);
     },
-    onApprovalNeeded: (callback: (step: PlanStep) => void) => {
-      const handler = (_: any, step: PlanStep) => callback(step);
+    onApprovalNeeded: (callback: (payload: { stepId: string; command: string; riskLevel: string; warningMessage?: string }) => void) => {
+      const handler = (_: any, payload: any) => callback(payload);
       ipcRenderer.on(IPC_CHANNELS.PLAN.APPROVAL_NEEDED, handler);
       return () => ipcRenderer.removeListener(IPC_CHANNELS.PLAN.APPROVAL_NEEDED, handler);
     },

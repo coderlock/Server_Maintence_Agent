@@ -20,7 +20,7 @@ export interface AppSettings {
   splitPanePosition: number;
   
   // Behavior Settings
-  defaultMode: 'fixer' | 'teacher';
+  defaultMode: 'planner' | 'teacher' | 'agentic';
   autoSaveSession: boolean;
   confirmDangerousCommands: boolean;
   
@@ -47,7 +47,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   theme: 'dark',
   splitPanePosition: 50,
   
-  defaultMode: 'fixer',
+  defaultMode: 'planner',
   autoSaveSession: true,
   confirmDangerousCommands: true,
   

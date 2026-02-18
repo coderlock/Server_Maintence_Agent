@@ -24,6 +24,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
   const [temperature, setTemperature] = useState(settings.aiTemperature);
   const [maxTokens, setMaxTokens] = useState(settings.aiMaxTokens);
   const [model, setModel] = useState(settings.aiModel);
+  const [provider, setProvider] = useState<'openai' | 'moonshot'>(settings.aiProvider ?? 'moonshot');
   const [defaultMode, setDefaultMode] = useState(settings.defaultMode);
   const [confirmDangerous, setConfirmDangerous] = useState(settings.confirmDangerousCommands);
   const [settingsSaved, setSettingsSaved] = useState(false);
@@ -46,6 +47,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
     setTemperature(settings.aiTemperature);
     setMaxTokens(settings.aiMaxTokens);
     setModel(settings.aiModel);
+    setProvider(settings.aiProvider ?? 'moonshot');
     setDefaultMode(settings.defaultMode);
     setConfirmDangerous(settings.confirmDangerousCommands);
   }, [settings]);
@@ -54,6 +56,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
     if (!apiKeyInput.trim()) return;
     setApiKeyStatus('validating');
     setApiKeyError('');
+
+    // Persist the selected provider first so the main process validates with the right provider
+    await window.electronAPI.settings.update({ aiProvider: provider });
 
     const result = await window.electronAPI.settings.setApiKey(apiKeyInput.trim()) as any;
     if (result.success) {
@@ -67,10 +72,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
       setApiKeyStatus('invalid');
       setApiKeyError(result.error ?? 'Validation failed');
     }
-  }, [apiKeyInput]);
+  }, [apiKeyInput, provider]);
 
   const handleSaveSettings = useCallback(async () => {
     await updateSettings({
+      aiProvider: provider,
       aiTemperature: temperature,
       aiMaxTokens: maxTokens,
       aiModel: model,
@@ -105,6 +111,24 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
             </h3>
 
             <div className="space-y-3">
+              {/* Provider selector */}
+              <div>
+                <label className="block text-xs text-vscode-text-secondary mb-1.5">Provider</label>
+                <select
+                  value={provider}
+                  onChange={e => {
+                    const p = e.target.value as 'openai' | 'moonshot';
+                    setProvider(p);
+                    // Reset model to a sensible default for the selected provider
+                    setModel(p === 'openai' ? 'gpt-4o' : 'kimi-k2.5');
+                  }}
+                  className="w-full bg-[#3c3c3c] text-vscode-text text-sm rounded px-3 py-2 outline-none border border-transparent focus:border-vscode-accent"
+                >
+                  <option value="openai">OpenAI</option>
+                  <option value="moonshot">Moonshot (Kimi)</option>
+                </select>
+              </div>
+
               {/* Current key status */}
               {hasStoredKey && !apiKeyInput && (
                 <div className="flex items-center gap-2 text-sm text-green-400 bg-green-400/10 border border-green-400/20 rounded px-3 py-2">
@@ -116,7 +140,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
               {/* API key input */}
               <div>
                 <label className="block text-xs text-vscode-text-secondary mb-1.5">
-                  Moonshot API Key {hasStoredKey && <span className="text-yellow-400">(enter new key to replace)</span>}
+                  {provider === 'openai' ? 'OpenAI API Key' : 'Moonshot API Key'}{hasStoredKey && <span className="text-yellow-400"> (enter new key to replace)</span>}
                 </label>
                 <div className="flex gap-2">
                   <div className="relative flex-1">
@@ -124,7 +148,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
                       type={showApiKey ? 'text' : 'password'}
                       value={apiKeyInput}
                       onChange={e => { setApiKeyInput(e.target.value); setApiKeyStatus('idle'); }}
-                      placeholder="sk-..."
+                      placeholder={provider === 'openai' ? 'sk-...' : 'sk-...'}
                       className="w-full bg-[#3c3c3c] text-vscode-text text-sm rounded px-3 py-2 pr-9 outline-none border border-transparent focus:border-vscode-accent placeholder-vscode-text-secondary"
                     />
                     <button
@@ -164,14 +188,15 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
                 )}
                 <p className="mt-1 text-[11px] text-vscode-text-secondary">
                   Get your key at{' '}
-                  <a
-                    href="https://platform.moonshot.cn/"
-                    target="_blank"
-                    rel="noreferrer"
-                    className="text-vscode-accent hover:underline"
-                  >
-                    platform.moonshot.cn
-                  </a>
+                  {provider === 'openai' ? (
+                    <a href="https://platform.openai.com/api-keys" target="_blank" rel="noreferrer" className="text-vscode-accent hover:underline">
+                      platform.openai.com
+                    </a>
+                  ) : (
+                    <a href="https://platform.moonshot.cn/" target="_blank" rel="noreferrer" className="text-vscode-accent hover:underline">
+                      platform.moonshot.cn
+                    </a>
+                  )}
                 </p>
               </div>
 
@@ -183,19 +208,39 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
                   onChange={e => setModel(e.target.value)}
                   className="w-full bg-[#3c3c3c] text-vscode-text text-sm rounded px-3 py-2 outline-none border border-transparent focus:border-vscode-accent"
                 >
-                  <optgroup label="Kimi K2.5 (Latest)">
-                    <option value="kimi-k2.5">kimi-k2.5 — Multimodal, reasoning (recommended)</option>
-                  </optgroup>
-                  <optgroup label="Kimi K2">
-                    <option value="kimi-k2-turbo-preview">kimi-k2-turbo-preview — Fast &amp; capable</option>
-                    <option value="kimi-k2-thinking-turbo">kimi-k2-thinking-turbo — Extended reasoning</option>
-                  </optgroup>
-                  <optgroup label="Moonshot V1 (Legacy)">
-                    <option value="moonshot-v1-8k">moonshot-v1-8k — Fast, 8K context</option>
-                    <option value="moonshot-v1-32k">moonshot-v1-32k — Balanced, 32K context</option>
-                    <option value="moonshot-v1-128k">moonshot-v1-128k — Max context, 128K</option>
-                    <option value="moonshot-v1-auto">moonshot-v1-auto — Auto context length</option>
-                  </optgroup>
+                  {provider === 'openai' ? (
+                    <>
+                      <optgroup label="GPT-4o">
+                        <option value="gpt-4o">gpt-4o — Latest multimodal (recommended)</option>
+                        <option value="gpt-4o-mini">gpt-4o-mini — Fast &amp; affordable</option>
+                      </optgroup>
+                      <optgroup label="GPT-4.1">
+                        <option value="gpt-4.1">gpt-4.1 — Flagship model</option>
+                        <option value="gpt-4.1-mini">gpt-4.1-mini — Cost-efficient</option>
+                        <option value="gpt-4.1-nano">gpt-4.1-nano — Fastest &amp; cheapest</option>
+                      </optgroup>
+                      <optgroup label="o-series (Reasoning)">
+                        <option value="o3">o3 — Advanced reasoning</option>
+                        <option value="o4-mini">o4-mini — Fast reasoning</option>
+                      </optgroup>
+                    </>
+                  ) : (
+                    <>
+                      <optgroup label="Kimi K2.5 (Latest)">
+                        <option value="kimi-k2.5">kimi-k2.5 — Multimodal, reasoning (recommended)</option>
+                      </optgroup>
+                      <optgroup label="Kimi K2">
+                        <option value="kimi-k2-turbo-preview">kimi-k2-turbo-preview — Fast &amp; capable</option>
+                        <option value="kimi-k2-thinking-turbo">kimi-k2-thinking-turbo — Extended reasoning</option>
+                      </optgroup>
+                      <optgroup label="Moonshot V1 (Legacy)">
+                        <option value="moonshot-v1-8k">moonshot-v1-8k — Fast, 8K context</option>
+                        <option value="moonshot-v1-32k">moonshot-v1-32k — Balanced, 32K context</option>
+                        <option value="moonshot-v1-128k">moonshot-v1-128k — Max context, 128K</option>
+                        <option value="moonshot-v1-auto">moonshot-v1-auto — Auto context length</option>
+                      </optgroup>
+                    </>
+                  )}
                 </select>
               </div>
 
@@ -230,7 +275,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
               <div>
                 <label className="block text-xs text-vscode-text-secondary mb-1.5">Default Mode</label>
                 <div className="flex gap-2">
-                  {(['fixer', 'teacher'] as const).map(m => (
+                  {(['planner', 'teacher', 'agentic'] as const).map(m => (
                     <button
                       key={m}
                       onClick={() => setDefaultMode(m)}

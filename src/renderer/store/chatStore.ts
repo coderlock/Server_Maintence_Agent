@@ -5,7 +5,7 @@
 
 import { create } from 'zustand';
 import { immer } from 'zustand/middleware/immer';
-import type { ChatMessage, ExecutionPlan, PlanStep } from '@shared/types';
+import type { ChatMessage, ExecutionPlan, PlanStep, ExecutionMode } from '@shared/types';
 
 interface ChatState {
   // Messages
@@ -17,7 +17,7 @@ interface ChatState {
   currentPlan: ExecutionPlan | null;
   
   // Mode
-  mode: 'fixer' | 'teacher';
+  mode: ExecutionMode;
   
   // Actions
   addMessage: (message: ChatMessage) => void;
@@ -33,7 +33,7 @@ interface ChatState {
   setPlan: (plan: ExecutionPlan | null) => void;
   updatePlanStep: (stepId: string, updates: Partial<PlanStep>) => void;
   
-  setMode: (mode: 'fixer' | 'teacher') => void;
+  setMode: (mode: ExecutionMode) => void;
 }
 
 export const useChatStore = create<ChatState>()(
@@ -42,7 +42,7 @@ export const useChatStore = create<ChatState>()(
     isLoading: false,
     streamingContent: '',
     currentPlan: null,
-    mode: 'fixer',
+    mode: 'planner',
     
     addMessage: (message) => {
       set((state) => {

@@ -38,13 +38,18 @@ export interface StepResult {
   stepId: string;
   stepIndex: number;
   command: string;
+  // Flat fields kept for backward-compat with SessionStore data written before Sprint 5
   exitCode: number;
   stdout: string;
   stderr: string;
   duration: number;
   timedOut: boolean;
+  // Structured full result — available in Sprint 5+; agent loop uses this
+  commandResult?: CommandResult;
   assessment?: StepAssessment;
   timestamp: string;
+  /** Sprint 6: which attempt this result belongs to (0 = first try) */
+  attemptIndex?: number;
 }
 
 /**
@@ -63,6 +68,37 @@ export interface ExecutionRecord {
 }
 
 /**
+ * Sprint 6: A step definition returned by AgentBrain — no id/index/status yet.
+ * PlanMutator promotes these to full PlanStep objects.
+ */
+export interface ProtoStep {
+  description: string;
+  command: string;
+  riskLevel: 'safe' | 'caution' | 'dangerous';
+  explanation?: string;
+  expectedOutput?: string;
+}
+
+/**
+ * Sprint 6: The action the Agent Brain recommends when a step fails.
+ * Drives the Agent Loop inside PlanExecutor.
+ */
+export type AgentCorrectionAction = 'retry' | 'modify' | 'insert_steps' | 'skip' | 'abort';
+
+export interface AgentCorrection {
+  action: AgentCorrectionAction;
+  /** Short human-readable explanation surfaced in the UI */
+  reasoning: string;
+  /**
+   * New steps to splice in after the failed step (insert_steps action).
+   * PlanMutator converts these to full PlanStep objects with unique IDs.
+   */
+  newSteps?: ProtoStep[];
+  /** Replacement command for a simple fix-and-retry (modify / retry action) */
+  modifiedCommand?: string;
+}
+
+/**
  * Events emitted during plan execution over IPC.
  * Extensible union — the renderer handles known types and ignores unknown ones,
  * so future agent events can be added here without breaking existing UI code.
@@ -72,12 +108,12 @@ export type PlanEvent =
   | { type: 'step-completed'; stepId: string; result: StepResult }
   | { type: 'step-failed'; stepId: string; result: StepResult }
   | { type: 'step-skipped'; stepId: string; reason: string }
-  | { type: 'approval-needed'; stepId: string; command: string; riskLevel: string }
+  | { type: 'approval-needed'; stepId: string; command: string; riskLevel: string; warningMessage?: string }
   | { type: 'approval-received'; stepId: string; approved: boolean }
   | { type: 'plan-completed'; results: StepResult[] }
   | { type: 'plan-cancelled'; reason: string; completedSteps: number }
-  // Future agent events — defined now so the IPC contract is stable for Sprint 5+
-  | { type: 'plan-revised'; reason: string; newStepCount: number }
+  // Sprint 6 agent events
+  | { type: 'plan-revised'; plan: import('./ai').ExecutionPlan; reason: string }
   | { type: 'retry-attempt'; stepId: string; attempt: number; maxAttempts: number }
   | { type: 'agent-thinking'; message: string }
   | { type: 'agent-stuck'; reason: string; failedAttempts: number }

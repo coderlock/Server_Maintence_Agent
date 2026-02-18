@@ -3,6 +3,15 @@
  */
 
 /**
+ * Execution mode for the plan executor.
+ * - 'teacher'  : manual, user runs each step; no auto-correction
+ * - 'planner'  : automatic linear execution; stops on failure (formerly 'fixer')
+ * - 'agentic'  : automatic linear execution; on failure enters Agent Loop to
+ *                diagnose, generate fix steps, and retry
+ */
+export type ExecutionMode = 'teacher' | 'planner' | 'agentic';
+
+/**
  * Lightweight DTO sent over IPC from renderer → main when submitting a message.
  * Renamed from AIContext to avoid collision with the AIContext builder class
  * in the main process (src/main/services/ai/AIContext.ts).
@@ -17,7 +26,7 @@ export interface AIRequestContext {
   };
   recentCommands?: string[];
   sessionHistory?: ChatMessage[];
-  mode: 'fixer' | 'teacher';
+  mode: ExecutionMode;
 }
 
 export interface ChatMessage {
@@ -38,20 +47,22 @@ export interface ExecutionPlan {
   goal: string;
   successCriteria: string[];
   steps: PlanStep[];
-  mode?: 'fixer' | 'teacher';
+  mode?: ExecutionMode;
   status: 'pending' | 'running' | 'paused' | 'completed' | 'failed' | 'cancelled';
   currentStepIndex: number;
   createdAt: string;
   startedAt?: string;
   completedAt?: string;
   rollbackPlan?: string[];
+  estimatedTime?: string;
 }
 
 export interface RiskAssessment {
-  level: 'safe' | 'caution' | 'dangerous';
+  level: 'safe' | 'caution' | 'dangerous' | 'blocked';
   category: string;
   reason: string;
   requiresApproval: boolean;
+  warningMessage?: string;
 }
 
 export interface PlanStep {

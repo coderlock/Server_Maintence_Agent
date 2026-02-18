@@ -21,7 +21,7 @@ export function registerAllHandlers(mainWindow: BrowserWindow): void {
   registerConnectionHandlers();
   registerSettingsHandlers();
   registerSessionHandlers();
-  registerPlanHandlers();
+  registerPlanHandlers(mainWindow);
   
   console.log('[IPC] All handlers registered');
 }

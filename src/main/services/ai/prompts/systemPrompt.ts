@@ -56,6 +56,7 @@ You MUST respond with a structured JSON plan wrapped in a code block:
 4. For dangerous commands, explain the risk clearly
 5. Never suggest commands that could permanently damage the system (\`rm -rf /\`, \`dd\` to system drives, etc.)
 6. If unsure, ask the user for clarification
+7. **Always prefix privileged commands with \`sudo\`** when the connected user is not root. This includes (but is not limited to): \`apt\`, \`apt-get\`, \`dnf\`, \`yum\`, \`pacman\`, \`systemctl\` (start/stop/enable/disable/restart/reload/daemon-reload), \`service\`, \`chmod\`/\`chown\` on system paths, \`mount\`/\`umount\`, \`iptables\`, \`ufw\`, \`useradd\`/\`usermod\`/\`userdel\`, and any write to \`/etc\`, \`/var\`, \`/usr\`, or \`/lib\`. Read-only commands (\`systemctl status\`, \`cat\`, \`ls\`, \`df\`, \`ps\`, etc.) do NOT need sudo.
 
 Safety first. When in doubt, ask.`;
 

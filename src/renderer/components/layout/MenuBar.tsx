@@ -132,10 +132,15 @@ export const MenuBar: React.FC = () => {
             onClick={() => setShowModeMenu(!showModeMenu)}
             disabled={!isConnected}
           >
-            {mode === 'fixer' ? (
+            {mode === 'planner' ? (
               <>
                 <Wrench className="h-4 w-4 mr-1" />
-                Fixer Mode
+                Planner Mode
+              </>
+            ) : mode === 'agentic' ? (
+              <>
+                <Wrench className="h-4 w-4 mr-1" />
+                Agentic Mode
               </>
             ) : (
               <>
@@ -156,12 +161,12 @@ export const MenuBar: React.FC = () => {
                 <button
                   className="w-full px-3 py-2 text-left text-sm hover:bg-[#2a2d2e] flex items-center"
                   onClick={() => {
-                    setMode('fixer');
+                    setMode('planner');
                     setShowModeMenu(false);
                   }}
                 >
                   <Wrench className="h-4 w-4 mr-2" />
-                  <span className="flex-1">Fixer Mode</span>
+                  <span className="flex-1">Planner Mode</span>
                   <span className="text-xs text-vscode-text-secondary">Auto-execute</span>
                 </button>
                 <button

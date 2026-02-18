@@ -49,10 +49,12 @@ export class AIContext {
 
   // ── Mode ────────────────────────────────────────────────────────
 
-  addMode(mode: 'fixer' | 'teacher'): this {
-    const desc = mode === 'fixer'
-      ? '**Mode: Fixer** — Commands will be executed automatically with appropriate safety checks. Be concise and actionable.'
-      : '**Mode: Teacher** — Show commands with detailed explanations. Do NOT auto-execute; the user will copy commands manually.';
+  addMode(mode: import('@shared/types').ExecutionMode): this {
+    const desc = mode === 'planner'
+      ? '**Mode: Planner** — Execute steps automatically in order. Stop on first failure. Be concise and actionable.'
+      : mode === 'agentic'
+        ? '**Mode: Agentic** — Execute steps automatically. On failure, analyse stderr and retry with a corrected command. Be concise and actionable.'
+        : '**Mode: Teacher** — Show commands with detailed explanations. Do NOT auto-execute; the user will copy commands manually.';
 
     this.blocks.push({
       priority: 0,

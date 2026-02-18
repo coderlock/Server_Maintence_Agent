@@ -1,7 +1,7 @@
 import React, { useRef, useEffect, useState, useCallback } from 'react';
 import {
   MessageSquare, Send, StopCircle, Trash2,
-  GraduationCap, Wrench, User, Bot, AlertTriangle, ChevronDown,
+  GraduationCap, Wrench, User, Bot, AlertTriangle, ChevronDown, ChevronRight,
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
@@ -9,6 +9,8 @@ import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import { useChatStore } from '../../store/chatStore';
 import { useConnectionStore } from '../../store/connectionStore';
 import { useAI } from '../../hooks/useAI';
+import { usePlanExecution } from '../../hooks/usePlanExecution';
+import { PlanView } from '../plan/PlanView';
 import { Button } from '../ui';
 import type { ChatMessage } from '@shared/types';
 
@@ -19,16 +21,28 @@ const ModeToggle: React.FC = () => {
   return (
     <div className="flex items-center gap-1 bg-[#1e1e1e] rounded p-0.5">
       <button
-        onClick={() => setMode('fixer')}
+        onClick={() => setMode('planner')}
         className={`flex items-center gap-1 px-2 py-0.5 rounded text-xs transition-colors ${
-          mode === 'fixer'
+          mode === 'planner'
             ? 'bg-vscode-accent text-white'
             : 'text-vscode-text-secondary hover:text-vscode-text'
         }`}
-        title="Fixer mode — AI can execute commands"
+        title="Planner mode — AI executes steps linearly, stops on failure"
       >
         <Wrench className="h-3 w-3" />
-        Fixer
+        Planner
+      </button>
+      <button
+        onClick={() => setMode('agentic')}
+        className={`flex items-center gap-1 px-2 py-0.5 rounded text-xs transition-colors ${
+          mode === 'agentic'
+            ? 'bg-vscode-accent text-white'
+            : 'text-vscode-text-secondary hover:text-vscode-text'
+        }`}
+        title="Agentic mode — AI self-corrects on failure"
+      >
+        <Wrench className="h-3 w-3" />
+        Agentic
       </button>
       <button
         onClick={() => setMode('teacher')}
@@ -44,6 +58,84 @@ const ModeToggle: React.FC = () => {
       </button>
     </div>
   );
+};
+
+// ── Collapsible code block (used for plan JSON) ─────────────────────────────
+const CollapsibleCodeBlock: React.FC<{ language: string; code: string }> = ({ language, code }) => {
+  const isPlan = language === 'json' && code.includes('"type": "plan"');
+  const [expanded, setExpanded] = useState(!isPlan);
+
+  if (!isPlan) {
+    return (
+      <SyntaxHighlighter
+        style={vscDarkPlus as any}
+        language={language}
+        PreTag="div"
+        className="!mt-2 !mb-2 !text-xs rounded"
+      >
+        {code}
+      </SyntaxHighlighter>
+    );
+  }
+
+  return (
+    <div className="mt-2 mb-2 rounded border border-[#3e3e3e] overflow-hidden">
+      <button
+        onClick={() => setExpanded(v => !v)}
+        className="w-full flex items-center gap-1.5 px-3 py-1.5 bg-[#1e1e1e] hover:bg-[#2a2a2a] transition-colors text-xs text-vscode-text-secondary text-left"
+      >
+        {expanded
+          ? <ChevronDown className="h-3.5 w-3.5 flex-shrink-0" />
+          : <ChevronRight className="h-3.5 w-3.5 flex-shrink-0" />}
+        <span className="font-mono text-[#ce9178]">plan.json</span>
+        {!expanded && (
+          <span className="ml-auto text-[10px] text-vscode-text-secondary">
+            {code.split('\n').length} lines — click to expand
+          </span>
+        )}
+      </button>
+      {expanded && (
+        <SyntaxHighlighter
+          style={vscDarkPlus as any}
+          language="json"
+          PreTag="div"
+          className="!mt-0 !mb-0 !text-xs !rounded-none"
+        >
+          {code}
+        </SyntaxHighlighter>
+      )}
+    </div>
+  );
+};
+
+// Defined at module scope so function references are stable across renders,
+// preventing ReactMarkdown from remounting CollapsibleCodeBlock (which would
+// reset its expanded state) whenever the parent re-renders.
+const markdownComponents = {
+  code({ className, children, ...props }: React.HTMLAttributes<HTMLElement> & { children?: React.ReactNode }) {
+    const match = /language-(\w+)/.exec(className || '');
+    const isInline = !match;
+    if (isInline) {
+      return (
+        <code
+          className="bg-[#1e1e1e] text-[#ce9178] px-1 py-0.5 rounded text-xs font-mono"
+          {...props}
+        >
+          {children}
+        </code>
+      );
+    }
+    return (
+      <CollapsibleCodeBlock
+        language={match[1]}
+        code={String(children).replace(/\n$/, '')}
+      />
+    );
+  },
+  p: ({ children }: { children?: React.ReactNode }) => <p className="mb-2 last:mb-0">{children}</p>,
+  ul: ({ children }: { children?: React.ReactNode }) => <ul className="list-disc list-inside mb-2 space-y-1">{children}</ul>,
+  ol: ({ children }: { children?: React.ReactNode }) => <ol className="list-decimal list-inside mb-2 space-y-1">{children}</ol>,
+  strong: ({ children }: { children?: React.ReactNode }) => <strong className="font-semibold text-white">{children}</strong>,
 };
 
 const MessageBubble: React.FC<{ message: ChatMessage }> = ({ message }) => {
@@ -82,38 +174,7 @@ const MessageBubble: React.FC<{ message: ChatMessage }> = ({ message }) => {
           <p className="whitespace-pre-wrap">{message.content}</p>
         ) : (
           <div className="prose prose-sm prose-invert max-w-none">
-          <ReactMarkdown
-            components={{
-              code({ className, children, ...props }) {
-                const match = /language-(\w+)/.exec(className || '');
-                const isInline = !match;
-                if (isInline) {
-                  return (
-                    <code
-                      className="bg-[#1e1e1e] text-[#ce9178] px-1 py-0.5 rounded text-xs font-mono"
-                      {...props}
-                    >
-                      {children}
-                    </code>
-                  );
-                }
-                return (
-                  <SyntaxHighlighter
-                    style={vscDarkPlus as any}
-                    language={match[1]}
-                    PreTag="div"
-                    className="!mt-2 !mb-2 !text-xs rounded"
-                  >
-                    {String(children).replace(/\n$/, '')}
-                  </SyntaxHighlighter>
-                );
-              },
-              p: ({ children }) => <p className="mb-2 last:mb-0">{children}</p>,
-              ul: ({ children }) => <ul className="list-disc list-inside mb-2 space-y-1">{children}</ul>,
-              ol: ({ children }) => <ol className="list-decimal list-inside mb-2 space-y-1">{children}</ol>,
-              strong: ({ children }) => <strong className="font-semibold text-white">{children}</strong>,
-            }}
-          >
+          <ReactMarkdown components={markdownComponents as any}>
             {message.content}
           </ReactMarkdown>
           </div>
@@ -158,6 +219,8 @@ export const ChatPanel: React.FC = () => {
   const { messages, isLoading, streamingContent, clearMessages } = useChatStore();
   const { activeConnection } = useConnectionStore();
   const { sendMessage, cancelMessage } = useAI();
+  const planExecution = usePlanExecution();
+  const hasPlan = planExecution.plan !== null;
 
   const [inputValue, setInputValue] = useState('');
   const [showScrollButton, setShowScrollButton] = useState(false);
@@ -232,6 +295,13 @@ export const ChatPanel: React.FC = () => {
           </button>
         )}
       </div>
+
+      {/* Plan Execution Panel */}
+      {hasPlan && (
+        <div className="flex-shrink-0 border-b border-[#3e3e3e] overflow-y-auto" style={{ maxHeight: '45%' }}>
+          <PlanView execution={planExecution} />
+        </div>
+      )}
 
       {/* Messages */}
       <div

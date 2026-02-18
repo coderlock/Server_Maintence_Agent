@@ -30,8 +30,11 @@ export const IPC_CHANNELS = {
   // Plan Channels
   PLAN: {
     GENERATED: 'plan:generated',
+    EXECUTE: 'plan:execute',           // renderer → main: start executing a plan
+    EVENT: 'plan:event',               // main → renderer: PlanEvent stream
     STEP_UPDATE: 'plan:step-update',
     APPROVAL_NEEDED: 'plan:approval-needed',
+    APPROVAL_RESPONSE: 'plan:approval-response', // renderer → main: approve/reject/skip
     APPROVE: 'plan:approve',
     REJECT: 'plan:reject',
     PAUSE: 'plan:pause',

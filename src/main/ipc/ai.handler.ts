@@ -13,6 +13,9 @@ export function registerAIHandlers(mainWindow: BrowserWindow): void {
   settingsStore.getApiKey().then(async (storedKey) => {
     if (storedKey) {
       const settings = await settingsStore.getSettings();
+      if (settings.aiProvider) {
+        aiOrchestrator.setProvider(settings.aiProvider);
+      }
       aiOrchestrator.initialize(storedKey, settings.aiModel);
       console.log('[AI] Auto-initialized from stored API key');
     }
@@ -27,7 +30,7 @@ export function registerAIHandlers(mainWindow: BrowserWindow): void {
     connectionId: string;
     connection: ActiveConnection;
     osInfo: OSInfo;
-    mode: 'fixer' | 'teacher';
+    mode: import('@shared/types').ExecutionMode;
   }) => {
     try {
       if (!aiOrchestrator.isInitialized()) {
