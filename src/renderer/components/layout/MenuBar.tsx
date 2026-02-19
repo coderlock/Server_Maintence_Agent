@@ -8,25 +8,20 @@ import {
   Plus, 
   Zap, 
   Settings,
-  Wrench,
-  GraduationCap,
-  ChevronDown,
   List,
   LogOut
 } from 'lucide-react';
 import { Button } from '../ui';
-import { useChatStore, useConnectionStore } from '@renderer/store';
+import { useConnectionStore } from '@renderer/store';
 import { useSSH } from '@renderer/hooks/useSSH';
 import { ConnectionManager, ConnectionForm } from '../connections';
 import { SettingsModal } from '../modals/SettingsModal';
 import type { SavedConnection } from '@shared/types';
 
 export const MenuBar: React.FC = () => {
-  const { mode, setMode } = useChatStore();
   const { activeConnection } = useConnectionStore();
   const { disconnect } = useSSH();
   
-  const [showModeMenu, setShowModeMenu] = useState(false);
   const [showConnectionManager, setShowConnectionManager] = useState(false);
   const [showConnectionForm, setShowConnectionForm] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
@@ -119,71 +114,6 @@ export const MenuBar: React.FC = () => {
             </div>
           </>
         )}
-        
-        {/* Separator */}
-        <div className="h-6 w-px bg-vscode-border mx-2" />
-        
-        {/* Mode Selector */}
-        <div className="relative">
-          <Button 
-            variant="ghost" 
-            size="sm" 
-            className="h-8"
-            onClick={() => setShowModeMenu(!showModeMenu)}
-            disabled={!isConnected}
-          >
-            {mode === 'planner' ? (
-              <>
-                <Wrench className="h-4 w-4 mr-1" />
-                Planner Mode
-              </>
-            ) : mode === 'agentic' ? (
-              <>
-                <Wrench className="h-4 w-4 mr-1" />
-                Agentic Mode
-              </>
-            ) : (
-              <>
-                <GraduationCap className="h-4 w-4 mr-1" />
-                Teacher Mode
-              </>
-            )}
-            <ChevronDown className="h-3 w-3 ml-1" />
-          </Button>
-          
-          {showModeMenu && (
-            <>
-              <div 
-                className="fixed inset-0 z-10" 
-                onClick={() => setShowModeMenu(false)}
-              />
-              <div className="absolute top-full left-0 mt-1 w-56 bg-[#252526] border border-vscode-border rounded shadow-lg z-20">
-                <button
-                  className="w-full px-3 py-2 text-left text-sm hover:bg-[#2a2d2e] flex items-center"
-                  onClick={() => {
-                    setMode('planner');
-                    setShowModeMenu(false);
-                  }}
-                >
-                  <Wrench className="h-4 w-4 mr-2" />
-                  <span className="flex-1">Planner Mode</span>
-                  <span className="text-xs text-vscode-text-secondary">Auto-execute</span>
-                </button>
-                <button
-                  className="w-full px-3 py-2 text-left text-sm hover:bg-[#2a2d2e] flex items-center"
-                  onClick={() => {
-                    setMode('teacher');
-                    setShowModeMenu(false);
-                  }}
-                >
-                  <GraduationCap className="h-4 w-4 mr-2" />
-                  <span className="flex-1">Teacher Mode</span>
-                  <span className="text-xs text-vscode-text-secondary">Step-by-step</span>
-                </button>
-              </div>
-            </>
-          )}
-        </div>
         
         {/* Spacer */}
         <div className="flex-1" />

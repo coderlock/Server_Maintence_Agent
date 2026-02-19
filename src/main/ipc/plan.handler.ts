@@ -131,8 +131,9 @@ export function registerPlanHandlers(mainWindow: BrowserWindow): void {
 
           if (event.type === 'plan-completed' || event.type === 'plan-cancelled') {
             activePlanExecutor = null;
-            // Return terminal to a command prompt so it doesn't end on a blank line
-            send(IPC_CHANNELS.SSH.DATA, '\r\n$ ');
+            // Write a newline to the live PTY so the shell re-displays its real prompt
+            // (correct username, hostname, directory, and ANSI colours from PS1)
+            sshManager.write('\n');
           }
         }
       } catch (err) {
@@ -143,6 +144,8 @@ export function registerPlanHandlers(mainWindow: BrowserWindow): void {
           completedSteps: 0,
         } as PlanEvent);
         activePlanExecutor = null;
+        // Write a newline to the live PTY so the shell re-displays its real prompt
+        sshManager.write('\n');
       }
     })();
 

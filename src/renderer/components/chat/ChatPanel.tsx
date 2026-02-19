@@ -224,11 +224,19 @@ export const ChatPanel: React.FC = () => {
 
   const [inputValue, setInputValue] = useState('');
   const [showScrollButton, setShowScrollButton] = useState(false);
+  const [hasApiKey, setHasApiKey] = useState(true);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
   const isConnected = activeConnection?.status === 'connected';
+
+  // Check if an API key is configured
+  useEffect(() => {
+    window.electronAPI.settings.getApiKey().then((result: any) => {
+      setHasApiKey(result.hasKey === true);
+    }).catch(() => setHasApiKey(false));
+  }, []);
 
   // Auto-scroll to bottom
   const scrollToBottom = useCallback((force = false) => {
@@ -355,10 +363,10 @@ export const ChatPanel: React.FC = () => {
       )}
 
       {/* API key warning */}
-      {isConnected && messages.length === 0 && (
+      {!hasApiKey && (
         <div className="mx-3 mb-2 flex items-center gap-2 text-xs text-yellow-400 bg-yellow-400/10 border border-yellow-400/20 rounded px-3 py-2">
           <AlertTriangle className="h-3.5 w-3.5 flex-shrink-0" />
-          <span>Open <strong>Settings</strong> (gear icon ↗) to configure your Moonshot API key.</span>
+          <span>Open <strong>Settings</strong> (gear icon ↗) to configure your LLM API key.</span>
         </div>
       )}
 

@@ -8,6 +8,7 @@ import React from 'react';
 import {
   Play, Pause, Square, RotateCcw, CheckCircle2,
   XCircle, Clock, Loader2, AlertTriangle, Info, Terminal, Zap,
+  ChevronRight, ChevronDown,
 } from 'lucide-react';
 import type { ExecutionPlan, PlanStep } from '@shared/types';
 import type { StepResult } from '@shared/types/execution';
@@ -41,6 +42,11 @@ const StatusIcon: React.FC<{ status: PlanStep['status']; isCurrentStep: boolean;
   return <Clock className="h-4 w-4 text-gray-500 flex-shrink-0" />;
 };
 
+// ── Log entry type ────────────────────────────────────────────────────────
+
+type LogEntryType = 'info' | 'success' | 'error' | 'retry' | 'replan';
+interface LogEntry { time: string; type: LogEntryType; message: string; }
+
 // ── Step row ───────────────────────────────────────────────────────────────
 
 interface StepRowProps {
@@ -49,15 +55,27 @@ interface StepRowProps {
   isCurrentStep: boolean;
   isBeingAnalyzed: boolean;
   result?: StepResult;
+  retryInfo?: { stepId: string; attempt: number; maxAttempts: number } | null;
+  agentMessage?: string | null;
+  stepError?: string | null;
 }
 
-const StepRow: React.FC<StepRowProps> = ({ step, index, isCurrentStep, isBeingAnalyzed, result }) => {
+const StepRow: React.FC<StepRowProps> = ({ step, index, isCurrentStep, isBeingAnalyzed, result, retryInfo, agentMessage, stepError }) => {
   const isActive = step.status === 'running' || isCurrentStep;
   const isRecovering = isBeingAnalyzed;
   const assessment = result?.assessment;
+  const isRetrying = !!(retryInfo && retryInfo.stepId === step.id);
+  const isCompleted = step.status === 'completed';
+
+  const [collapsed, setCollapsed] = React.useState(isCompleted);
+
+  // Auto-collapse when step transitions to completed
+  React.useEffect(() => {
+    if (step.status === 'completed') setCollapsed(true);
+  }, [step.status]);
 
   return (
-    <div className={`border rounded-md p-3 transition-colors ${
+    <div className={`border rounded-md transition-colors ${isCompleted ? 'px-3 py-1.5' : 'p-3'} ${
       isRecovering
         ? 'border-purple-500/60 bg-purple-900/10'
         : isActive
@@ -68,19 +86,32 @@ const StepRow: React.FC<StepRowProps> = ({ step, index, isCurrentStep, isBeingAn
               ? 'border-red-700/30 bg-red-900/10'
               : 'border-[#1e3a5f]/60 bg-[#111827]'
     }`}>
-      <div className="flex items-start gap-2">
-        <div className="flex items-center gap-1.5 mt-0.5">
+      {/* Header row — always visible, clickable to toggle on completed steps */}
+      <div
+        className={`flex items-center gap-2${isCompleted ? ' cursor-pointer select-none' : ''}`}
+        onClick={isCompleted ? () => setCollapsed(v => !v) : undefined}
+      >
+        <div className="flex items-center gap-1.5">
           <span className="text-[10px] text-vscode-text-secondary w-5 text-right">{index + 1}.</span>
           <StatusIcon status={step.status} isCurrentStep={isCurrentStep} isBeingAnalyzed={isBeingAnalyzed} />
         </div>
+        <div className="flex-1 min-w-0 flex items-center gap-2 flex-wrap">
+          <span className="text-xs text-vscode-text font-medium">{step.description}</span>
+          <RiskBadge level={step.riskAssessment.level} />
+        </div>
+        {isCompleted && (
+          collapsed
+            ? <ChevronRight className="h-3.5 w-3.5 text-gray-500 flex-shrink-0" />
+            : <ChevronDown className="h-3.5 w-3.5 text-gray-500 flex-shrink-0" />
+        )}
+      </div>
 
+      {/* Collapsible body */}
+      {!collapsed && (
+      <div className="flex items-start gap-2 mt-2">
+        <div className="w-[26px] flex-shrink-0" />{/* spacer aligns with header */}
         <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 flex-wrap">
-            <span className="text-xs text-vscode-text font-medium">{step.description}</span>
-            <RiskBadge level={step.riskAssessment.level} />
-          </div>
-
-          <div className="mt-1 flex items-center gap-1.5 font-mono text-[11px] text-[#9cdcfe] bg-[#141414] rounded px-2 py-1">
+          <div className="flex items-center gap-1.5 font-mono text-[11px] text-[#9cdcfe] bg-[#141414] rounded px-2 py-1">
             <Terminal className="h-3 w-3 text-gray-500 flex-shrink-0" />
             <span className="truncate">{step.command}</span>
           </div>
@@ -89,6 +120,44 @@ const StepRow: React.FC<StepRowProps> = ({ step, index, isCurrentStep, isBeingAn
             <p className="mt-1 text-[11px] text-vscode-text-secondary leading-relaxed">
               {step.explanation}
             </p>
+          )}
+
+          {/* Replanning banner — AI is analyzing this failure */}
+          {isBeingAnalyzed && (
+            <div className="mt-2 flex items-center gap-1.5 text-[11px] text-purple-300 bg-purple-900/20 border border-purple-600/40 rounded px-2 py-1 animate-pulse">
+              <Zap className="h-3 w-3 flex-shrink-0" />
+              AI analyzing failure — generating recovery plan…
+            </div>
+          )}
+
+          {/* Inline retry indicator with attempt dots */}
+          {isRetrying && (
+            <div className="mt-2 flex items-center gap-1.5 text-[11px] text-orange-400 bg-orange-900/20 border border-orange-700/30 rounded px-2 py-1">
+              <RotateCcw className="h-3 w-3 animate-spin flex-shrink-0" />
+              <span className="font-medium">Retrying…</span>
+              <span className="text-gray-500">Attempt {retryInfo!.attempt} of {retryInfo!.maxAttempts}</span>
+              <div className="ml-auto flex gap-0.5">
+                {Array.from({ length: retryInfo!.maxAttempts }).map((_, i) => (
+                  <div key={i} className={`h-1.5 w-3 rounded-sm ${i < retryInfo!.attempt ? 'bg-orange-500' : 'bg-gray-700'}`} />
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Inline error (retry budget exhausted, etc.) */}
+          {stepError && (
+            <div className="mt-2 flex items-start gap-1.5 text-[11px] text-red-400 bg-red-900/20 border border-red-700/30 rounded px-2 py-1.5">
+              <XCircle className="h-3 w-3 flex-shrink-0 mt-0.5" />
+              <span className="break-words">{stepError}</span>
+            </div>
+          )}
+
+          {/* Inline agent message (plan revised, etc.) */}
+          {agentMessage && (
+            <div className="mt-2 flex items-start gap-1.5 text-[11px] text-yellow-400 bg-yellow-900/20 border border-yellow-700/30 rounded px-2 py-1.5">
+              <Info className="h-3 w-3 flex-shrink-0 mt-0.5" />
+              <span className="break-words">{agentMessage}</span>
+            </div>
           )}
 
           {/* Output from executed step */}
@@ -119,6 +188,7 @@ const StepRow: React.FC<StepRowProps> = ({ step, index, isCurrentStep, isBeingAn
           )}
         </div>
       </div>
+      )}
     </div>
   );
 };
@@ -159,6 +229,91 @@ export const FixerPlanView: React.FC<FixerPlanViewProps> = ({
   const completedCount = [...stepResults.values()].filter(r => r.assessment?.succeeded).length;
   const totalSteps = plan.steps.length;
   const progressPct = totalSteps > 0 ? Math.round((completedCount / totalSteps) * 100) : 0;
+  const hasFailed = plan.steps.some(s => s.status === 'failed');
+  const isDone = !isExecuting && stepResults.size > 0;
+
+  // ── Execution log (Option B: derived from prop changes via useEffect) ────
+  const [executionLog, setExecutionLog] = React.useState<LogEntry[]>([]);
+  const [logOpen, setLogOpen] = React.useState(false);
+  const logEndRef = React.useRef<HTMLDivElement>(null);
+  const loggedResultsRef = React.useRef(new Set<string>());
+  const prevIsExecutingRef = React.useRef(false);
+  const prevIsReplanningRef = React.useRef(false);
+  const prevRetryKeyRef = React.useRef<string | null>(null);
+  const prevStepIndexRef = React.useRef(-1);
+
+  const ts = () => new Date().toLocaleTimeString('en-US', { hour12: false });
+
+  // Log execution lifecycle (start / finish)
+  React.useEffect(() => {
+    if (isExecuting && !prevIsExecutingRef.current) {
+      loggedResultsRef.current.clear();
+      prevStepIndexRef.current = -1;
+      setExecutionLog([{ time: ts(), type: 'info', message: 'Execution started' }]);
+    } else if (!isExecuting && prevIsExecutingRef.current && stepResults.size > 0) {
+      setExecutionLog(prev => [...prev, {
+        time: ts(),
+        type: hasFailed ? 'error' : 'success',
+        message: `Execution finished — ${completedCount}/${totalSteps} steps succeeded`,
+      }]);
+    }
+    prevIsExecutingRef.current = isExecuting;
+  }, [isExecuting]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Log step starts
+  React.useEffect(() => {
+    if (isExecuting && currentStepIndex !== prevStepIndexRef.current && currentStepIndex >= 0 && currentStepIndex < totalSteps) {
+      const step = plan.steps[currentStepIndex];
+      if (step) {
+        setExecutionLog(prev => [...prev, { time: ts(), type: 'info', message: `Step ${currentStepIndex + 1} started: ${step.description}` }]);
+      }
+    }
+    prevStepIndexRef.current = currentStepIndex;
+  }, [currentStepIndex, isExecuting]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Log step results as they arrive
+  React.useEffect(() => {
+    stepResults.forEach((result, stepId) => {
+      if (!loggedResultsRef.current.has(stepId)) {
+        loggedResultsRef.current.add(stepId);
+        const stepIdx = plan.steps.findIndex(s => s.id === stepId);
+        const label = stepIdx >= 0 ? `Step ${stepIdx + 1}` : stepId;
+        if (result.assessment?.succeeded) {
+          setExecutionLog(prev => [...prev, { time: ts(), type: 'success', message: `${label} completed successfully` }]);
+        } else if (result.assessment) {
+          setExecutionLog(prev => [...prev, { time: ts(), type: 'error', message: `${label} failed: ${result.assessment!.reason}` }]);
+        }
+      }
+    });
+  }, [stepResults]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Log retries
+  React.useEffect(() => {
+    if (retryInfo) {
+      const key = `${retryInfo.stepId}-${retryInfo.attempt}`;
+      if (key !== prevRetryKeyRef.current) {
+        prevRetryKeyRef.current = key;
+        const stepIdx = plan.steps.findIndex(s => s.id === retryInfo.stepId);
+        const label = stepIdx >= 0 ? `Step ${stepIdx + 1}` : retryInfo.stepId;
+        setExecutionLog(prev => [...prev, { time: ts(), type: 'retry', message: `${label} — retry attempt ${retryInfo.attempt} of ${retryInfo.maxAttempts}` }]);
+      }
+    }
+  }, [retryInfo]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Log replanning
+  React.useEffect(() => {
+    if (isReplanning && !prevIsReplanningRef.current) {
+      setExecutionLog(prev => [...prev, { time: ts(), type: 'replan', message: 'AI replanning triggered — analyzing failure and generating recovery steps…' }]);
+    }
+    prevIsReplanningRef.current = isReplanning;
+  }, [isReplanning]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Auto-scroll log to bottom when new entries arrive
+  React.useEffect(() => {
+    if (logOpen && logEndRef.current) {
+      logEndRef.current.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [executionLog, logOpen]);
 
   return (
     <div className="flex flex-col gap-3 p-3 text-sm">
@@ -208,40 +363,21 @@ export const FixerPlanView: React.FC<FixerPlanViewProps> = ({
         </div>
       </div>
 
-      {/* Progress bar */}
-      {isExecuting && (
+      {/* Progress bar — always visible once there are steps */}
+      {totalSteps > 0 && (
         <div className="w-full bg-[#2d2d2d] rounded-full h-1.5">
           <div
-            className="bg-vscode-accent h-1.5 rounded-full transition-all duration-500"
-            style={{ width: `${progressPct}%` }}
+            className="h-1.5 rounded-full transition-all duration-500"
+            style={{
+              width: `${progressPct}%`,
+              backgroundColor: hasFailed ? '#f87171' : 'var(--vscode-button-background, #0e639c)',
+            }}
           />
         </div>
       )}
 
-      {/* Agent messages (no-ops now, used when AgentLoop ships) */}
-      {agentMessage && (
-        <div className="flex items-center gap-1.5 text-[11px] text-yellow-400 bg-yellow-900/20 border border-yellow-700/30 rounded px-2 py-1.5">
-          <Info className="h-3 w-3 flex-shrink-0" />
-          {agentMessage}
-        </div>
-      )}
-      {retryInfo && (
-        <div className="flex items-center gap-1.5 text-[11px] text-blue-400 bg-blue-900/20 border border-blue-700/30 rounded px-2 py-1.5">
-          <RotateCcw className="h-3 w-3 flex-shrink-0" />
-          Retry attempt {retryInfo.attempt} / {retryInfo.maxAttempts}
-        </div>
-      )}
-
-      {/* Error */}
-      {error && (
-        <div className="flex items-start gap-1.5 text-[11px] text-red-400 bg-red-900/20 border border-red-700/30 rounded px-2 py-1.5">
-          <XCircle className="h-3 w-3 flex-shrink-0 mt-0.5" />
-          <span className="break-words">{error}</span>
-        </div>
-      )}
-
       {/* Rollback hint */}
-      {error && plan.rollbackPlan && plan.rollbackPlan.length > 0 && (
+      {hasFailed && plan.rollbackPlan && plan.rollbackPlan.length > 0 && (
         <div className="text-[11px] text-gray-400 bg-[#0a1628] border border-[#1e3a5f]/60 rounded p-2">
           <p className="font-medium text-gray-300 mb-1">Rollback steps:</p>
           {plan.rollbackPlan.map((cmd, i) => (
@@ -260,9 +396,30 @@ export const FixerPlanView: React.FC<FixerPlanViewProps> = ({
             isCurrentStep={isExecuting && i === currentStepIndex}
             isBeingAnalyzed={isReplanning && step.status === 'failed' && retryInfo?.stepId === step.id}
             result={stepResults.get(step.id)}
+            retryInfo={retryInfo}
+            stepError={step.status === 'failed' ? error : null}
+            agentMessage={step.status === 'failed' ? agentMessage : null}
           />
         ))}
       </div>
+
+      {/* Completion banner */}
+      {isDone && (
+        <div className={`flex items-center gap-2 rounded px-3 py-2 text-xs font-medium border ${
+          hasFailed
+            ? 'text-yellow-300 bg-yellow-900/20 border-yellow-700/40'
+            : 'text-green-300 bg-green-900/20 border-green-700/40'
+        }`}>
+          {hasFailed
+            ? <AlertTriangle className="h-4 w-4 flex-shrink-0" />
+            : <CheckCircle2 className="h-4 w-4 flex-shrink-0" />}
+          <span>
+            {hasFailed
+              ? `Completed with errors — ${completedCount} of ${totalSteps} steps succeeded`
+              : `All ${totalSteps} step${totalSteps !== 1 ? 's' : ''} completed successfully`}
+          </span>
+        </div>
+      )}
 
       {/* Success criteria */}
       {plan.successCriteria.length > 0 && (
@@ -271,6 +428,40 @@ export const FixerPlanView: React.FC<FixerPlanViewProps> = ({
           <ul className="list-disc list-inside space-y-0.5">
             {plan.successCriteria.map((c, i) => <li key={i}>{c}</li>)}
           </ul>
+        </div>
+      )}
+
+      {/* Collapsible execution log */}
+      {executionLog.length > 0 && (
+        <div className="border border-[#1e3a5f]/60 rounded overflow-hidden">
+          <button
+            onClick={() => setLogOpen(v => !v)}
+            className="w-full flex items-center justify-between px-2.5 py-1.5 text-[11px] text-gray-400 hover:text-gray-200 hover:bg-[#0f1f35] transition-colors"
+          >
+            <span className="flex items-center gap-1.5">
+              <Terminal className="h-3 w-3" />
+              Execution log
+              <span className="text-gray-600">({executionLog.length} events)</span>
+            </span>
+            <span className="text-gray-600 text-[10px]">{logOpen ? '▲ hide' : '▼ show'}</span>
+          </button>
+          {logOpen && (
+            <div className="max-h-48 overflow-y-auto bg-[#070d14] px-2.5 py-2 space-y-0.5">
+              {executionLog.map((entry, i) => (
+                <div key={i} className={`text-[10px] font-mono flex gap-2 ${
+                  entry.type === 'error'   ? 'text-red-400' :
+                  entry.type === 'success' ? 'text-green-400' :
+                  entry.type === 'retry'   ? 'text-orange-400' :
+                  entry.type === 'replan'  ? 'text-purple-400' :
+                                            'text-gray-500'
+                }`}>
+                  <span className="text-gray-700 flex-shrink-0 select-none">{entry.time}</span>
+                  <span className="break-words">{entry.message}</span>
+                </div>
+              ))}
+              <div ref={logEndRef} />
+            </div>
+          )}
         </div>
       )}
     </div>
