@@ -85,7 +85,7 @@ export const StatusBar: React.FC = () => {
       <div className="flex items-center gap-2">
         <span className="text-white/70">Mode:</span>
         <span className="font-medium">
-          {mode === 'planner' ? 'Planner' : mode === 'agentic' ? 'Agentic' : 'Teacher'}
+          {mode === 'agent' ? 'Agent' : 'Manual'}
         </span>
       </div>
 

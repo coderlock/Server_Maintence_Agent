@@ -11,6 +11,7 @@
 import { useCallback, useEffect, useReducer } from 'react';
 import type { ExecutionPlan } from '@shared/types';
 import type { PlanEvent, StepResult } from '@shared/types/execution';
+import type { StepStallState } from '../components/plan/StallIndicator';
 
 // ── State ──────────────────────────────────────────────────────────────────
 
@@ -20,6 +21,18 @@ interface PlanExecutionState {
   isPaused: boolean;
   currentStepIndex: number;
   stepResults: Map<string, StepResult>;
+  /**
+   * Live output streaming for the currently executing step.
+   * Accumulated from step-output events while the step is running.
+   * Cleared when the step result arrives (step results have the final output).
+   */
+  liveStepOutput: Map<string, { stdout: string; stderr: string }>;
+  /**
+   * Sprint 8: Stall / prompt state per executing step.
+   * Key: stepId. Populated by idle-timer and prompt-detected events.
+   * Cleared when the step completes, fails, or input is submitted.
+   */
+  stepStallStates: Record<string, StepStallState>;
   pendingApproval: {
     stepId: string;
     command: string;
@@ -39,6 +52,8 @@ const initialState: PlanExecutionState = {
   isPaused: false,
   currentStepIndex: 0,
   stepResults: new Map(),
+  liveStepOutput: new Map(),
+  stepStallStates: {},
   pendingApproval: null,
   error: null,
   isReplanning: false,
@@ -82,15 +97,56 @@ function planReducer(state: PlanExecutionState, action: PlanAction): PlanExecuti
       const ev = action.event;
 
       switch (ev.type) {
-        case 'step-started':
+        case 'step-started': {
+          // Mark the step as running in the plan so step boxes update immediately
+          if (state.plan) {
+            const updatedSteps = state.plan.steps.map(s =>
+              s.id === ev.stepId ? { ...s, status: 'running' as const } : s
+            );
+            return {
+              ...state,
+              currentStepIndex: ev.stepIndex,
+              error: null,
+              plan: { ...state.plan, steps: updatedSteps },
+            };
+          }
           return { ...state, currentStepIndex: ev.stepIndex, error: null };
+        }
+
+        case 'step-output': {
+          // Accumulate live output while the step is still running.
+          // The stream field is always 'stdout' in real-terminal mode (stderr is merged),
+          // and usually both in batch mode.
+          const prev = state.liveStepOutput.get(ev.stepId) ?? { stdout: '', stderr: '' };
+          const updated = new Map(state.liveStepOutput);
+          updated.set(ev.stepId, {
+            ...prev,
+            [ev.stream]: prev[ev.stream as 'stdout' | 'stderr'] + ev.chunk,
+          });
+          return { ...state, liveStepOutput: updated };
+        }
 
         case 'step-completed': {
           const newResults = new Map(state.stepResults);
           newResults.set(ev.stepId, ev.result);
+          // Clear live output — the final result is now in stepResults
+          const newLive = new Map(state.liveStepOutput);
+          newLive.delete(ev.stepId);
+          // Clear stall state for this step
+          const { [ev.stepId]: _sc, ...restStall1 } = state.stepStallStates;
+          // Mark the step as completed in the plan so the step box colors immediately
+          const planAfterComplete = state.plan ? {
+            ...state.plan,
+            steps: state.plan.steps.map(s =>
+              s.id === ev.stepId ? { ...s, status: 'completed' as const } : s
+            ),
+          } : state.plan;
           return {
             ...state,
+            plan: planAfterComplete,
             stepResults: newResults,
+            liveStepOutput: newLive,
+            stepStallStates: restStall1,
             currentStepIndex: ev.result.stepIndex + 1,
           };
         }
@@ -98,9 +154,23 @@ function planReducer(state: PlanExecutionState, action: PlanAction): PlanExecuti
         case 'step-failed': {
           const newResults = new Map(state.stepResults);
           newResults.set(ev.stepId, ev.result);
+          const newLive = new Map(state.liveStepOutput);
+          newLive.delete(ev.stepId);
+          // Clear stall state for this step
+          const { [ev.stepId]: _sf, ...restStall2 } = state.stepStallStates;
+          // Mark the step as failed in the plan so the step box colors immediately
+          const planAfterFail = state.plan ? {
+            ...state.plan,
+            steps: state.plan.steps.map(s =>
+              s.id === ev.stepId ? { ...s, status: 'failed' as const } : s
+            ),
+          } : state.plan;
           return {
             ...state,
+            plan: planAfterFail,
             stepResults: newResults,
+            liveStepOutput: newLive,
+            stepStallStates: restStall2,
             error: ev.result.assessment?.reason ?? 'Step failed',
           };
         }
@@ -129,7 +199,65 @@ function planReducer(state: PlanExecutionState, action: PlanAction): PlanExecuti
         case 'plan-cancelled':
           return { ...state, isExecuting: false, error: ev.reason };
 
-        // ── Future agent events — already wired up ──────────────
+        // ── Sprint 8: idle timer / stall events ────────────────────────
+
+        case 'prompt-detected': {
+          // Always upgrades to prompt-detected state (overrides idle-warning)
+          return {
+            ...state,
+            stepStallStates: {
+              ...state.stepStallStates,
+              [ev.stepId]: {
+                status: 'prompt-detected',
+                promptText: ev.promptText,
+              },
+            },
+          };
+        }
+
+        case 'idle-warning': {
+          // Only set if not already showing a higher-priority state
+          const existing = state.stepStallStates[ev.stepId];
+          if (
+            existing?.status === 'prompt-detected' ||
+            existing?.status === 'idle-stalled' ||
+            existing?.status === 'agent-analyzing'
+          ) {
+            return state;
+          }
+          return {
+            ...state,
+            stepStallStates: {
+              ...state.stepStallStates,
+              [ev.stepId]: {
+                status: 'idle-warning',
+                silenceSeconds: ev.silenceSeconds,
+              },
+            },
+          };
+        }
+
+        case 'stall-detected': {
+          return {
+            ...state,
+            stepStallStates: {
+              ...state.stepStallStates,
+              [ev.stepId]: {
+                status: ev.agentAction === null ? 'agent-analyzing' : 'idle-stalled',
+                silenceSeconds: ev.silenceSeconds,
+                agentMessage: ev.agentReasoning,
+              },
+            },
+          };
+        }
+
+        case 'stall-input-submitted': {
+          // Input sent — clear the stall state; command should resume
+          const { [ev.stepId]: _, ...restStall } = state.stepStallStates;
+          return { ...state, stepStallStates: restStall };
+        }
+
+        // ── Future agent events ──────────────────────────────────────────
         case 'plan-revised':
           return {
             ...state,
@@ -204,11 +332,11 @@ export function usePlanExecution() {
     };
   }, []);
 
-  const startExecution = useCallback(async (planId: string, mode: import('@shared/types').ExecutionMode = 'planner') => {
+  const startExecution = useCallback(async (planId: string, mode: import('@shared/types').ExecutionMode = 'manual', stepIndex?: number) => {
     dispatch({ type: 'SET_EXECUTING', isExecuting: true });
     dispatch({ type: 'SET_PAUSED', isPaused: false });
     try {
-      await window.electronAPI.plan.execute(planId, mode);
+      await window.electronAPI.plan.execute(planId, mode, stepIndex);
     } catch (err) {
       dispatch({
         type: 'PLAN_EVENT',

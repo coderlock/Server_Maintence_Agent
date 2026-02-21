@@ -12,11 +12,23 @@
 import { ipcMain, BrowserWindow } from 'electron';
 import { IPC_CHANNELS } from '@shared/constants';
 import { PlanExecutor } from '../services/execution/PlanExecutor';
-import { CommandExecutor, SSHExecutor } from '../services/execution/CommandExecutor';
+import { CommandExecutor } from '../services/execution/CommandExecutor';
 import { ApprovalHandler } from '../services/execution/StepExecutor';
 import { sshManager } from '../services/ssh/SSHManager';
-import type { PlanEvent } from '@shared/types/execution';
+import { BatchStrategy, RealTerminalStrategy } from '../services/execution/strategies';
+import type { ExecutionStrategy } from '../services/execution/strategies';
+import type { ShellSessionInfo } from '../services/execution/strategies/sessionSetup';
+import { buildFallbackPromptRegex } from '../services/execution/strategies/sessionSetup';
+import { settingsStore } from '../services/storage/SettingsStore';
+import type { ExecutionConfig, PlanEvent } from '@shared/types/execution';
 import type { ExecutionPlan, ActiveConnection, OSInfo } from '@shared/types';
+import {
+  detectInteractivePrompt,
+  detectInteractivePromptDeep,
+} from '../services/execution/interactivePromptDetector';
+import type { IdleEvent } from '../services/execution/IdleTimerManager';
+import { agentBrain } from '../services/agent/AgentBrain';
+import { AgentContext } from '../services/agent/AgentContext';
 
 // ── Module-level state ─────────────────────────────────────────────────────
 
@@ -28,26 +40,61 @@ let activeConnectionContext: {
   connection: ActiveConnection;
   osInfo: OSInfo;
   connectionId: string;
+  shellSessionInfo: ShellSessionInfo;   // Sprint 9: shell type + prompt regex + detection mode
 } | null = null;
 
 let activePlanExecutor: PlanExecutor | null = null;
+
+/** Sprint 8: module-level reference to the active CommandExecutor for PROMPT_INPUT handler */
+let activeCommandExecutor: CommandExecutor | null = null;
+
+/** Sprint 8: planId of the currently executing plan, for stall analysis step lookup */
+let activePlanId: string = '';
+
+/**
+ * Hard cancellation flag — set synchronously on cancel so that any
+ * in-flight async work (idle-stalled agent call, etc.) can bail out early
+ * without waiting for the async generator to unwind.
+ */
+let executionCancelled = false;
 
 /** Resolves the pending approval promise when the user responds */
 let pendingApprovalResolve: ((decision: 'approve' | 'reject' | 'skip') => void) | null = null;
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
-function makeSSHExecutor(): SSHExecutor {
-  return {
-    async executeCommand(command: string) {
-      const result = await sshManager.executeCommand(command);
-      return {
-        stdout: result.stdout,
-        stderr: result.stderr,
-        exitCode: result.code, // SSHCommandResult uses .code; CommandExecutor uses .exitCode
+/**
+ * Factory: create the appropriate ExecutionStrategy based on the current setting.
+ * The resulting strategy is injected into CommandExecutor on each plan run.
+ */
+function createStrategy(config: ExecutionConfig): ExecutionStrategy {
+  switch (config.outputMode) {
+    case 'real-terminal': {
+      // Use the session info from the connection context to select 'prompt' or 'markers' mode.
+      // Provide a safe default if somehow the context is not available.
+      const sessionInfo: ShellSessionInfo = activeConnectionContext?.shellSessionInfo ?? {
+        shellType: 'unknown',
+        promptRegex: buildFallbackPromptRegex('user'),
+        setupComplete: false,
+        detectionMode: 'markers',
       };
-    },
-  };
+      return new RealTerminalStrategy(
+        (data: string) => sshManager.write(data),
+        (listener: (data: string) => void) => sshManager.registerDataListener(listener),
+        (listener: (data: string) => void) => sshManager.removeDataListener(listener),
+        sessionInfo,
+      );
+    }
+
+    case 'batch':
+    case 'streaming': // streaming not yet implemented — falls back to batch
+    default:
+      return new BatchStrategy(async (command: string) => {
+        const result = await sshManager.executeCommand(command);
+        // SSHCommandResult uses .code; BatchStrategy expects .exitCode
+        return { stdout: result.stdout, stderr: result.stderr, exitCode: result.code };
+      });
+  }
 }
 
 // ── Handler registration ───────────────────────────────────────────────────
@@ -68,7 +115,7 @@ export function registerPlanHandlers(mainWindow: BrowserWindow): void {
   });
 
   // ── Execute plan ─────────────────────────────────────────────────────────
-  ipcMain.handle(IPC_CHANNELS.PLAN.EXECUTE, async (_event, planId: string, mode?: import('@shared/types').ExecutionMode) => {
+  ipcMain.handle(IPC_CHANNELS.PLAN.EXECUTE, async (_event, planId: string, mode?: import('@shared/types').ExecutionMode, singleStepIndex?: number) => {
     const plan = planStore.get(planId);
     if (!plan) {
       throw new Error(`Plan ${planId} not found. It may have expired.`);
@@ -95,12 +142,177 @@ export function registerPlanHandlers(mainWindow: BrowserWindow): void {
       },
     };
 
-    const commandExecutor = new CommandExecutor(makeSSHExecutor());
+    // ── Build execution config from app settings ──────────────────────────────
+    const appSettings = await settingsStore.getSettings();
+    const executionConfig: ExecutionConfig = {
+      outputMode: appSettings.executionOutputMode ?? 'batch',
+      commandTimeoutMs: 120_000,
+      maxOutputBytes: 2 * 1024 * 1024,   // 2 MiB
+      maxStderrBytes: 512 * 1024,         // 512 KiB
+      idleWarningSeconds: appSettings.idleWarningSeconds ?? 15,   // Sprint 8
+      idleStalledSeconds: appSettings.idleStalledSeconds ?? 45,   // Sprint 8
+    };
+
+    const strategy = createStrategy(executionConfig);
+    const commandExecutor = new CommandExecutor(strategy, executionConfig);
+    activeCommandExecutor = commandExecutor;
+    activePlanId = planId;
     activePlanExecutor = new PlanExecutor(commandExecutor, approvalHandler);
+    executionCancelled = false;
 
     const { connection, osInfo, connectionId } = activeConnectionContext;
     // Execution-time mode takes precedence over the mode stored on the plan
-    const executionMode: import('@shared/types').ExecutionMode = mode ?? (plan as any).mode ?? 'planner';
+    const executionMode: import('@shared/types').ExecutionMode = mode ?? (plan as any).mode ?? 'agent';
+
+    // ── Real-time step card updates ────────────────────────────────────────
+    // CommandExecutor emits stdout/stderr chunks while a command runs.
+    // We track the activeStepId (set when we see step-started in the for-await loop)
+    // so the renderer can buffer chunks by step.
+    let activeStepId = '';
+    commandExecutor.on('stdout', (chunk: string) => {
+      if (activeStepId) {
+        send(IPC_CHANNELS.PLAN.EVENT, { type: 'step-output', stepId: activeStepId, chunk, stream: 'stdout' });
+
+        // Sprint 8: real-time per-chunk prompt detection
+        const detection = detectInteractivePrompt(chunk);
+        if (detection.detected) {
+          send(IPC_CHANNELS.PLAN.EVENT, {
+            type: 'prompt-detected',
+            stepId: activeStepId,
+            promptText: detection.promptText,
+            matchedPattern: detection.matchedPattern,
+            source: 'realtime',
+          } satisfies PlanEvent);
+        }
+      }
+    });
+    commandExecutor.on('stderr', (chunk: string) => {
+      if (activeStepId) {
+        send(IPC_CHANNELS.PLAN.EVENT, { type: 'step-output', stepId: activeStepId, chunk, stream: 'stderr' });
+      }
+    });
+
+    // ── Sprint 8: Idle timer event handlers (out-of-band from generator loop) ───
+    commandExecutor.on('idle-warning', (event: IdleEvent) => {
+      if (!activeStepId) return;
+
+      // Re-examine accumulated output with a larger context window
+      const detection = detectInteractivePromptDeep(event.lastOutput);
+      if (detection.detected) {
+        send(IPC_CHANNELS.PLAN.EVENT, {
+          type: 'prompt-detected',
+          stepId: activeStepId,
+          promptText: detection.promptText,
+          matchedPattern: detection.matchedPattern,
+          source: 'idle-warning',
+        } satisfies PlanEvent);
+      } else {
+        send(IPC_CHANNELS.PLAN.EVENT, {
+          type: 'idle-warning',
+          stepId: activeStepId,
+          silenceSeconds: event.silenceSeconds,
+        } satisfies PlanEvent);
+      }
+    });
+
+    commandExecutor.on('idle-stalled', async (event: IdleEvent) => {
+      if (!activeStepId) return;
+      const stalledStepId = activeStepId; // capture — may change during async work
+
+      // Final prompt detection pass before involving the agent
+      const detection = detectInteractivePromptDeep(event.lastOutput);
+      if (detection.detected) {
+        send(IPC_CHANNELS.PLAN.EVENT, {
+          type: 'prompt-detected',
+          stepId: stalledStepId,
+          promptText: detection.promptText,
+          matchedPattern: detection.matchedPattern,
+          source: 'idle-stalled',
+        } satisfies PlanEvent);
+        return;
+      }
+
+      // No prompt found — notify UI that agent analysis is starting
+      // Guard: if execution was cancelled while we were doing prompt detection, bail
+      if (executionCancelled) return;
+
+      send(IPC_CHANNELS.PLAN.EVENT, {
+        type: 'stall-detected',
+        stepId: stalledStepId,
+        silenceSeconds: event.silenceSeconds,
+        agentAction: null,
+        agentReasoning: 'Analyzing…',
+      } satisfies PlanEvent);
+
+      // Build a minimal StepResult for the agent to analyse
+      const accumulatedOutput = commandExecutor.getAccumulatedOutput();
+      const currentPlan = planStore.get(activePlanId);
+      const step = currentPlan?.steps.find(s => s.id === stalledStepId);
+
+      if (!step) {
+        console.warn('[Plan] idle-stalled: could not find step', stalledStepId);
+        return;
+      }
+
+      const partialResult = {
+        stepId: stalledStepId,
+        stepIndex: step.index,
+        command: step.command,
+        exitCode: -1,
+        stdout: accumulatedOutput,
+        stderr: '',
+        duration: 0,
+        timedOut: false,
+        timestamp: new Date().toISOString(),
+      };
+
+      const emptyCtx = new AgentContext();
+      const correction = await agentBrain.analyzeStall(step, partialResult, emptyCtx);
+
+      // Guard: if execution was cancelled while the AI call was in-flight, discard result
+      if (executionCancelled) return;
+
+      console.log(`[Plan] analyzeStall action=${correction.action} step=${stalledStepId}: ${correction.reasoning}`);
+
+      // Report the agent's decision to the renderer
+      const agentAction: PlanEvent & { type: 'stall-detected' } = {
+        type: 'stall-detected',
+        stepId: stalledStepId,
+        silenceSeconds: event.silenceSeconds,
+        agentAction: correction.action === 'retry' ? 'wait'
+          : correction.action === 'modify' ? 'send-input'
+          : correction.action === 'skip' ? 'skip'
+          : correction.action === 'abort' ? 'abort'
+          : null,
+        agentReasoning: correction.reasoning,
+      };
+      send(IPC_CHANNELS.PLAN.EVENT, agentAction);
+
+      // Act on the agent's decision
+      switch (correction.action) {
+        case 'retry':
+          // "Wait longer" — reset the hard stall timer
+          commandExecutor.resetHardStallTimer();
+          break;
+
+        case 'modify':
+          // Agent suggests sending specific input as stdin
+          if (correction.modifiedCommand) {
+            if (executionConfig.outputMode === 'real-terminal') {
+              sshManager.write(correction.modifiedCommand);
+            }
+          }
+          break;
+
+        case 'skip':
+        case 'abort':
+          commandExecutor.abortCurrentCommand();
+          break;
+
+        default:
+          commandExecutor.abortCurrentCommand();
+      }
+    });
 
     // Run executor in the background — IPC handle returns immediately
     (async () => {
@@ -108,29 +320,48 @@ export function registerPlanHandlers(mainWindow: BrowserWindow): void {
       try {
         for await (const event of activePlanExecutor.execute(plan, {
           connection, osInfo, mode: executionMode, connectionId,
+          singleStepIndex: singleStepIndex,
         })) {
           send(IPC_CHANNELS.PLAN.EVENT, event);
 
-          // Mirror command output to the xterm terminal panel
-          if (event.type === 'step-completed' || event.type === 'step-failed') {
-            const result = event.result;
-            // exec() channel output uses bare \n — normalise to \r\n
-            // so xterm.js moves the cursor to column 0 on each new line.
-            const normLF = (s: string) => s.replace(/\r\n/g, '\n').replace(/\n/g, '\r\n');
-            // Filter noisy informational warnings that clutter the terminal
-            const filterStderr = (s: string) => s
-              .split('\n')
-              .filter(line => !/WARNING: apt does not have a stable CLI interface/i.test(line))
-              .join('\n');
-            if (result.stdout) send(IPC_CHANNELS.SSH.DATA, normLF(result.stdout));
-            if (result.stderr) {
-              const cleaned = filterStderr(result.stderr).trim();
-              if (cleaned) send(IPC_CHANNELS.SSH.DATA, `\x1b[33m${normLF(cleaned)}\x1b[0m`);
+          // Track the step currently executing (for chunk forwarding above)
+          if (event.type === 'step-started') {
+            activeStepId = event.stepId;
+          } else if (
+            event.type === 'step-completed' ||
+            event.type === 'step-failed' ||
+            event.type === 'step-skipped'
+          ) {
+            activeStepId = '';
+          }
+
+          // Mirror command output to the xterm terminal panel.
+          // Skip in real-terminal mode — output already appears live in the terminal.
+          if (executionConfig.outputMode !== 'real-terminal') {
+            if (event.type === 'step-completed' || event.type === 'step-failed') {
+              const result = event.result;
+              // exec() channel output uses bare \n — normalise to \r\n
+              // so xterm.js moves the cursor to column 0 on each new line.
+              const normLF = (s: string) => s.replace(/\r\n/g, '\n').replace(/\n/g, '\r\n');
+              // Filter noisy informational warnings that clutter the terminal
+              const filterStderr = (s: string) => s
+                .split('\n')
+                .filter(line => !/WARNING: apt does not have a stable CLI interface/i.test(line))
+                .join('\n');
+              if (result.stdout) send(IPC_CHANNELS.SSH.DATA, normLF(result.stdout));
+              if (result.stderr) {
+                const cleaned = filterStderr(result.stderr).trim();
+                if (cleaned) send(IPC_CHANNELS.SSH.DATA, `\x1b[33m${normLF(cleaned)}\x1b[0m`);
+              }
             }
           }
 
           if (event.type === 'plan-completed' || event.type === 'plan-cancelled') {
+            commandExecutor.dispose();
             activePlanExecutor = null;
+            activeCommandExecutor = null;
+            activePlanId = '';
+            executionCancelled = false;
             // Write a newline to the live PTY so the shell re-displays its real prompt
             // (correct username, hostname, directory, and ANSI colours from PS1)
             sshManager.write('\n');
@@ -143,7 +374,11 @@ export function registerPlanHandlers(mainWindow: BrowserWindow): void {
           reason,
           completedSteps: 0,
         } as PlanEvent);
+        commandExecutor.dispose();
         activePlanExecutor = null;
+        activeCommandExecutor = null;
+        activePlanId = '';
+        executionCancelled = false;
         // Write a newline to the live PTY so the shell re-displays its real prompt
         sshManager.write('\n');
       }
@@ -177,15 +412,51 @@ export function registerPlanHandlers(mainWindow: BrowserWindow): void {
 
   // ── Cancel ────────────────────────────────────────────────────────────────
   ipcMain.on(IPC_CHANNELS.PLAN.CANCEL, () => {
+    // Set the hard flag first so any in-flight async callbacks bail out immediately
+    executionCancelled = true;
+
+    // Abort the currently running command (sends Ctrl+C for real-terminal, resolves
+    // immediately for batch). This also disposes idle timers.
+    activeCommandExecutor?.dispose();
+    activeCommandExecutor = null;
+
+    // Signal the PlanExecutor loop to stop between steps
     if (activePlanExecutor) {
       activePlanExecutor.cancel();
       activePlanExecutor = null;
     }
+
+    // Unblock any pending approval dialog
     if (pendingApprovalResolve) {
       pendingApprovalResolve('reject');
       pendingApprovalResolve = null;
     }
+
+    activePlanId = '';
     console.log('[Plan] Cancelled');
+  });
+
+  // ── Sprint 8: User prompt input response ──────────────────────────────────────────
+  ipcMain.on(IPC_CHANNELS.PLAN.PROMPT_INPUT, (_event, data: { stepId: string; input: string }) => {
+    const isPassword = data.input.toLowerCase().includes('password');
+    console.log(`[Plan] Prompt input for step ${data.stepId}: ${isPassword ? '***' : data.input.trim()}`);
+
+    // Write the input to the PTY / exec channel
+    // In batch mode, writing stdin to an SSH exec channel is not supported in the current
+    // BatchStrategy. The StallIndicator shows a hint to switch to Real Terminal mode.
+    if (activeCommandExecutor) {
+      // Always use sshManager.write() which works for the live PTY (real-terminal).
+      // For batch mode this will write to the shell but may not reach the exec channel stdin —
+      // acceptable limitation documented in the Sprint 8 build plan (Section 8.5).
+      sshManager.write(data.input);
+    }
+
+    // Notify renderer that input was submitted (clears stall state for this step)
+    send(IPC_CHANNELS.PLAN.EVENT, {
+      type: 'stall-input-submitted',
+      stepId: data.stepId,
+      input: isPassword ? '***' : data.input,
+    } satisfies PlanEvent);
   });
 
   console.log('[IPC] Plan handlers registered');
@@ -201,6 +472,7 @@ export function setPlanConnectionContext(ctx: {
   connection: ActiveConnection;
   osInfo: OSInfo;
   connectionId: string;
+  shellSessionInfo: ShellSessionInfo;   // Sprint 9
 }): void {
   activeConnectionContext = ctx;
 }

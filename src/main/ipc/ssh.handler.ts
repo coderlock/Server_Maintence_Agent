@@ -9,6 +9,8 @@ import { sshManager } from '../services/ssh/SSHManager';
 import { OSDetector } from '../services/ssh/OSDetector';
 import { connectionStore } from '../services/storage/ConnectionStore';
 import { setPlanConnectionContext } from './plan.handler';
+import { initializeSession, buildFallbackPromptRegex } from '../services/execution/strategies/sessionSetup';
+import type { ShellSessionInfo } from '../services/execution/strategies/sessionSetup';
 import type { ConnectionConfig, ActiveConnection } from '@shared/types';
 
 export function registerSSHHandlers(mainWindow: BrowserWindow): void {
@@ -68,7 +70,33 @@ export function registerSSHHandlers(mainWindow: BrowserWindow): void {
           connectedAt: new Date().toISOString(),
           osInfo,
         };
-        setPlanConnectionContext({ connection: activeConn, osInfo, connectionId });
+
+        // Sprint 9: Detect shell and inject invisible exit-code embedding
+        let shellSessionInfo: ShellSessionInfo;
+        try {
+          shellSessionInfo = await initializeSession(
+            (data: string) => sshManager.write(data),
+            async (cmd: string) => {
+              const result = await sshManager.executeCommand(cmd);
+              return result.stdout;
+            },
+            config.username,
+            config.host,
+          );
+          console.log(
+            `[SSH] Shell: ${shellSessionInfo.shellType}, detection mode: ${shellSessionInfo.detectionMode}`,
+          );
+        } catch (err) {
+          console.warn('[SSH] Session setup failed — falling back to markers:', err);
+          shellSessionInfo = {
+            shellType: 'unknown',
+            promptRegex: buildFallbackPromptRegex(config.username),
+            setupComplete: false,
+            detectionMode: 'markers',
+          };
+        }
+
+        setPlanConnectionContext({ connection: activeConn, osInfo, connectionId, shellSessionInfo });
         
         // Send connected event with OS info
         mainWindow.webContents.send(IPC_CHANNELS.SSH.CONNECTED, osInfo);

@@ -6,6 +6,7 @@
 import { Client, ClientChannel } from 'ssh2';
 import { EventEmitter } from 'events';
 import type { SSHConnectionConfig, PTYOptions, SSHCommandResult } from '@shared/types';
+import { INTERACTIVE_PROMPT_REGEX } from '../../utils/interactivePromptPatterns';
 
 export class SSHConnection extends EventEmitter {
   private client: Client;
@@ -137,21 +138,43 @@ export class SSHConnection extends EventEmitter {
         
         let stdout = '';
         let stderr = '';
-        
+        let settled = false;
+
+        /**
+         * Resolve immediately with whatever output has been captured so far.
+         * Destroys the remote exec channel so the process gets SIGPIPE / EOF
+         * and exits rather than waiting indefinitely for stdin.
+         */
+        const settle = (code: number) => {
+          if (settled) return;
+          settled = true;
+          try { stream.destroy(); } catch { /* ignore */ }
+          resolve({ stdout, stderr, code });
+        };
+
+        const checkForPrompt = (chunk: string) => {
+          // Test the latest chunk plus a window of recent output to catch
+          // prompts that span a chunk boundary.
+          if (INTERACTIVE_PROMPT_REGEX.test(chunk)) {
+            console.warn('[SSHConnection] Interactive prompt detected — killing channel early');
+            settle(126); // 126 = command not executable / stdin unavailable
+          }
+        };
+
         stream.on('data', (data: Buffer) => {
-          stdout += data.toString();
+          const chunk = data.toString();
+          stdout += chunk;
+          if (!settled) checkForPrompt(chunk);
         });
         
         stream.stderr.on('data', (data: Buffer) => {
-          stderr += data.toString();
+          const chunk = data.toString();
+          stderr += chunk;
+          if (!settled) checkForPrompt(chunk);
         });
         
         stream.on('close', (code?: number) => {
-          resolve({ 
-            stdout, 
-            stderr, 
-            code: code ?? 0 
-          });
+          settle(code ?? 0);
         });
       });
     });

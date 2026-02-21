@@ -42,7 +42,7 @@ export const useChatStore = create<ChatState>()(
     isLoading: false,
     streamingContent: '',
     currentPlan: null,
-    mode: 'planner',
+    mode: 'manual' as ExecutionMode,
     
     addMessage: (message) => {
       set((state) => {

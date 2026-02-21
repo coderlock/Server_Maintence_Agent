@@ -13,6 +13,7 @@ import { contextBuilder } from './ContextBuilder';
 import { storePlan } from '../../ipc/plan.handler';
 import { AIContext } from './AIContext';
 import { BASE_SYSTEM_PROMPT, STEP_EVALUATION_PROMPT } from './prompts/systemPrompt';
+import { planParser } from '../execution/PlanParser';
 import type { ChatMessage, ExecutionPlan, OSInfo, ActiveConnection } from '@shared/types';
 import type { CommandResult, StepAssessment } from '@shared/types/execution';
 import type { LLMMessage, LLMProvider, LLMResponse, LLMStreamHandler } from './providers/LLMProvider';
@@ -237,39 +238,25 @@ export class AIOrchestrator {
 
   private extractPlan(content: string, mode?: ExecutionMode): ExecutionPlan | null {
     try {
-      const jsonMatch = content.match(/```json\s*([\s\S]*?)\s*```/);
-      if (!jsonMatch) return null;
+      // 1. Try fenced code block first  ``` json ... ``` or ``` ... ```
+      const fenceMatch = content.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
+      // 2. Fall back to the first top-level JSON object in the response
+      const bareMatch = content.match(/\{[\s\S]*\}/);
 
-      const parsed = JSON.parse(jsonMatch[1]);
+      const raw = fenceMatch?.[1] ?? bareMatch?.[0];
+      if (!raw) return null;
+
+      const parsed = JSON.parse(raw);
       if (parsed.type !== 'plan' || !Array.isArray(parsed.steps)) return null;
 
-      const plan: ExecutionPlan = {
-        id: uuidv4(),
-        goal: parsed.goal ?? 'Unnamed plan',
-        successCriteria: parsed.successCriteria ?? [],
-        mode: mode ?? 'planner',
-        steps: parsed.steps.map((step: any, index: number) => ({
-          id: uuidv4(),
-          index,
-          description: step.description ?? '',
-          command: step.command ?? '',
-          riskAssessment: {
-            level: step.riskLevel ?? 'caution',
-            category: 'general',
-            reason: step.explanation ?? '',
-            requiresApproval: step.riskLevel === 'dangerous',
-          },
-          status: 'pending' as const,
-          explanation: step.explanation,
-          expectedOutput: step.expectedOutput,
-          verificationCommand: step.verificationCommand,
-        })),
-        status: 'pending',
-        currentStepIndex: 0,
-        createdAt: new Date().toISOString(),
-        rollbackPlan: parsed.rollbackPlan,
-      };
+      const { plan, errors } = planParser.validateAndNormalize(parsed);
+      if (!plan) {
+        console.warn('[AIOrchestrator] Plan validation failed:', errors);
+        return null;
+      }
 
+      // Apply the executor mode that the caller specified
+      plan.mode = mode ?? 'agent';
       return plan;
     } catch (err) {
       console.error('[AIOrchestrator] Failed to extract plan:', err);

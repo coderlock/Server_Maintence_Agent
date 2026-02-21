@@ -1,12 +1,14 @@
 /**
- * ModeSelector — segmented control for Teacher / Planner / Agentic modes.
+ * ModeSelector — segmented control for Manual / Agent modes.
  *
- * Placed in the PlanView header so users can switch execution mode any time
- * before clicking Run. Reads and writes from chatStore (single source of truth).
+ * - Manual: user clicks Run on each individual step; full execution pipeline
+ * - Agent:  single Run at the top; autonomous execution with AI error recovery
+ *
+ * Reads and writes from chatStore (single source of truth).
  */
 
 import React from 'react';
-import { GraduationCap, Wrench, Zap } from 'lucide-react';
+import { Hand, Zap } from 'lucide-react';
 import { useChatStore } from '../../store/chatStore';
 import type { ExecutionMode } from '@shared/types';
 
@@ -19,21 +21,15 @@ interface ModeOption {
 
 const MODES: ModeOption[] = [
   {
-    id: 'teacher',
-    label: 'Teacher',
-    tooltip: 'Teacher — show commands with explanations, no auto-execution',
-    Icon: GraduationCap,
+    id: 'manual',
+    label: 'Manual',
+    tooltip: 'Manual — click Run on each step individually; full execution pipeline per step',
+    Icon: Hand,
   },
   {
-    id: 'planner',
-    label: 'Planner',
-    tooltip: 'Planner — execute steps automatically, stop on first failure',
-    Icon: Wrench,
-  },
-  {
-    id: 'agentic',
-    label: 'Agentic',
-    tooltip: 'Agentic — execute and self-correct using AI on failure',
+    id: 'agent',
+    label: 'Agent',
+    tooltip: 'Agent — run the whole plan autonomously; self-corrects on failure using AI',
     Icon: Zap,
   },
 ];
@@ -63,7 +59,7 @@ export const ModeSelector: React.FC<ModeSelectorProps> = ({ disabled = false }) 
             title={tooltip}
             className={`flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium transition-colors ${
               isActive
-                ? id === 'agentic'
+                ? id === 'agent'
                   ? 'bg-purple-600 text-white'
                   : 'bg-vscode-accent text-white'
                 : 'text-vscode-text-secondary hover:text-vscode-text hover:bg-[#2d2d2d]'

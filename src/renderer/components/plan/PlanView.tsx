@@ -1,5 +1,5 @@
 /**
- * PlanView — container that switches between Teacher / Planner / Agentic modes.
+ * PlanView — container that switches between Manual and Agent modes.
  * Renders when a plan exists in the execution hook.
  * Data-driven: reflects state, not flow.
  *
@@ -11,7 +11,9 @@ import React from 'react';
 import { X } from 'lucide-react';
 import type { usePlanExecution } from '../../hooks/usePlanExecution';
 import { useChatStore } from '../../store/chatStore';
+import { useSettingsStore } from '../../store/settingsStore';
 import { FixerPlanView } from './FixerPlanView';
+import { ManualPlanView } from './ManualPlanView';
 import { ApprovalModal } from '../modals/ApprovalModal';
 
 type PlanExecutionReturn = ReturnType<typeof usePlanExecution>;
@@ -22,6 +24,10 @@ interface PlanViewProps {
 
 export const PlanView: React.FC<PlanViewProps> = ({ execution }) => {
   const { mode } = useChatStore(); // kept for onStart mode arg
+  const { settings } = useSettingsStore();
+
+  /** In real-terminal mode the strategy merges stderr into stdout (PTY behaviour). */
+  const mergesStderr = (settings.executionOutputMode ?? 'batch') === 'real-terminal';
 
   if (!execution.plan) return null;
 
@@ -32,6 +38,8 @@ export const PlanView: React.FC<PlanViewProps> = ({ execution }) => {
     isReplanning,
     currentStepIndex,
     stepResults,
+    liveStepOutput,
+    stepStallStates,
     pendingApproval,
     error,
     agentMessage,
@@ -60,21 +68,41 @@ export const PlanView: React.FC<PlanViewProps> = ({ execution }) => {
 
       {/* Plan content */}
       <div className="flex-1 overflow-y-auto bg-[#0d1117]">
-        <FixerPlanView
-          plan={plan}
-          isExecuting={isExecuting}
-          isPaused={isPaused}
-          isReplanning={isReplanning}
-          currentStepIndex={currentStepIndex}
-          stepResults={stepResults}
-          error={error}
-          agentMessage={agentMessage}
-          retryInfo={retryInfo}
-          onStart={() => execution.startExecution(plan.id, mode)}
-          onPause={execution.pause}
-          onResume={execution.resume}
-          onCancel={execution.cancel}
-        />
+        {mode === 'manual' ? (
+          <ManualPlanView
+            plan={plan}
+            planId={plan.id}
+            isExecuting={isExecuting}
+            currentStepIndex={currentStepIndex}
+            stepResults={stepResults}
+            liveStepOutput={liveStepOutput}
+            mergesStderr={mergesStderr}
+            stepStallStates={stepStallStates}
+            pendingApproval={pendingApproval}
+            error={error}
+            onRunStep={(stepIndex) => execution.startExecution(plan.id, 'manual', stepIndex)}
+            onCancel={execution.cancel}
+          />
+        ) : (
+          <FixerPlanView
+            plan={plan}
+            isExecuting={isExecuting}
+            isPaused={isPaused}
+            isReplanning={isReplanning}
+            currentStepIndex={currentStepIndex}
+            stepResults={stepResults}
+            liveStepOutput={liveStepOutput}
+            mergesStderr={mergesStderr}
+            stepStallStates={stepStallStates}
+            error={error}
+            agentMessage={agentMessage}
+            retryInfo={retryInfo}
+            onStart={() => execution.startExecution(plan.id, mode)}
+            onPause={execution.pause}
+            onResume={execution.resume}
+            onCancel={execution.cancel}
+          />
+        )}
       </div>
 
       {/* Approval modal — rendered on top when a dangerous command needs approval */}

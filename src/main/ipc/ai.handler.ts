@@ -1,7 +1,6 @@
 import { ipcMain, BrowserWindow } from 'electron';
 import { IPC_CHANNELS } from '@shared/constants';
 import { aiOrchestrator } from '../services/ai/AIOrchestrator';
-import { contextBuilder } from '../services/ai/ContextBuilder';
 import { settingsStore } from '../services/storage/SettingsStore';
 import { sessionStore } from '../services/storage/SessionStore';
 import type { OSInfo, ActiveConnection } from '@shared/types';
@@ -84,16 +83,6 @@ export function registerAIHandlers(mainWindow: BrowserWindow): void {
   /** Cancel the current in-flight AI request */
   ipcMain.on(IPC_CHANNELS.AI.CANCEL, () => {
     aiOrchestrator.cancel();
-  });
-
-  /** Append SSH PTY data to the terminal output buffer used for AI context */
-  ipcMain.on('ai:terminal-data', (_event, data: string) => {
-    contextBuilder.appendTerminalOutput(data);
-  });
-
-  /** Clear the terminal buffer (e.g. when user clears the terminal) */
-  ipcMain.on('ai:clear-terminal-buffer', () => {
-    contextBuilder.clearTerminalBuffer();
   });
 
   /** Get current session token count for StatusBar display */

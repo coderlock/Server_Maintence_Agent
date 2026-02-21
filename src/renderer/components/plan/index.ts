@@ -1,4 +1,4 @@
 export { PlanView } from './PlanView';
 export { FixerPlanView } from './FixerPlanView';
-export { TeacherPlanView } from './TeacherPlanView';
+export { ManualPlanView } from './ManualPlanView';
 export { ModeSelector } from './ModeSelector';

@@ -27,6 +27,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
   const [provider, setProvider] = useState<'openai' | 'moonshot'>(settings.aiProvider ?? 'moonshot');
   const [defaultMode, setDefaultMode] = useState(settings.defaultMode);
   const [confirmDangerous, setConfirmDangerous] = useState(settings.confirmDangerousCommands);
+  const [executionOutputMode, setExecutionOutputMode] = useState<'batch' | 'real-terminal'>(settings.executionOutputMode ?? 'batch');
+  const [idleWarningSeconds, setIdleWarningSeconds] = useState(settings.idleWarningSeconds ?? 15);
+  const [idleStalledSeconds, setIdleStalledSeconds] = useState(settings.idleStalledSeconds ?? 45);
   const [settingsSaved, setSettingsSaved] = useState(false);
 
   // Load current API key status on open
@@ -50,6 +53,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
     setProvider(settings.aiProvider ?? 'moonshot');
     setDefaultMode(settings.defaultMode);
     setConfirmDangerous(settings.confirmDangerousCommands);
+    setExecutionOutputMode(settings.executionOutputMode ?? 'batch');
+    setIdleWarningSeconds(settings.idleWarningSeconds ?? 15);
+    setIdleStalledSeconds(settings.idleStalledSeconds ?? 45);
   }, [settings]);
 
   const handleSaveApiKey = useCallback(async () => {
@@ -82,10 +88,13 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
       aiModel: model,
       defaultMode,
       confirmDangerousCommands: confirmDangerous,
+      executionOutputMode,
+      idleWarningSeconds,
+      idleStalledSeconds,
     });
     setSettingsSaved(true);
     setTimeout(() => setSettingsSaved(false), 2000);
-  }, [updateSettings, temperature, maxTokens, model, defaultMode, confirmDangerous]);
+  }, [updateSettings, temperature, maxTokens, model, defaultMode, confirmDangerous, executionOutputMode, idleWarningSeconds, idleStalledSeconds]);
 
   if (!isOpen) return null;
 
@@ -275,7 +284,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
               <div>
                 <label className="block text-xs text-vscode-text-secondary mb-1.5">Default Mode</label>
                 <div className="flex gap-2">
-                  {(['planner', 'teacher', 'agentic'] as const).map(m => (
+                  {(['manual', 'agent'] as const).map(m => (
                     <button
                       key={m}
                       onClick={() => setDefaultMode(m)}
@@ -305,6 +314,70 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
                   </p>
                 </div>
               </label>
+
+              {/* ── Execution Output Mode ──────────────────────────── */}
+              <div>
+                <label className="block text-xs text-vscode-text-secondary mb-1.5">Command Output Mode</label>
+                <select
+                  value={executionOutputMode}
+                  onChange={e => setExecutionOutputMode(e.target.value as 'batch' | 'real-terminal')}
+                  className="w-full bg-[#3c3c3c] text-vscode-text text-sm rounded px-3 py-2 outline-none border border-transparent focus:border-vscode-accent"
+                >
+                  <option value="batch">Standard (Separate Channel)</option>
+                  <option value="real-terminal">Real Terminal (Live Session)</option>
+                </select>
+                <p className="mt-1.5 text-[11px] text-vscode-text-secondary leading-relaxed">
+                  {executionOutputMode === 'batch'
+                    ? 'Commands run in a background SSH channel. Output appears after each command completes. stderr is separate from stdout.'
+                    : 'Commands run directly in your terminal session. Output appears in real time with full colour and formatting. stderr is merged with stdout.'}
+                </p>
+              </div>
+
+              {/* ── Idle Timer Thresholds (Sprint 8) ─────────────── */}
+              <div>
+                <label className="block text-xs text-vscode-text-secondary mb-1.5">
+                  Soft Stall Warning (seconds)
+                </label>
+                <input
+                  type="number"
+                  min={0}
+                  max={120}
+                  value={idleWarningSeconds}
+                  onChange={(e) =>
+                    setIdleWarningSeconds(Math.max(0, parseInt(e.target.value, 10) || 0))
+                  }
+                  className="w-full bg-[#3c3c3c] text-vscode-text text-sm rounded px-3 py-2 outline-none border border-transparent focus:border-vscode-accent"
+                />
+                <p className="mt-1.5 text-[11px] text-vscode-text-secondary leading-relaxed">
+                  Show a warning when a command produces no output for this many seconds.
+                  Set to 0 to disable. Default: 15
+                </p>
+              </div>
+
+              <div>
+                <label className="block text-xs text-vscode-text-secondary mb-1.5">
+                  Hard Stall Threshold (seconds)
+                </label>
+                <input
+                  type="number"
+                  min={0}
+                  max={300}
+                  value={idleStalledSeconds}
+                  onChange={(e) => {
+                    const val = Math.max(0, parseInt(e.target.value, 10) || 0);
+                    if (val > 0 && idleWarningSeconds > 0 && val <= idleWarningSeconds) {
+                      setIdleStalledSeconds(idleWarningSeconds + 5);
+                    } else {
+                      setIdleStalledSeconds(val);
+                    }
+                  }}
+                  className="w-full bg-[#3c3c3c] text-vscode-text text-sm rounded px-3 py-2 outline-none border border-transparent focus:border-vscode-accent"
+                />
+                <p className="mt-1.5 text-[11px] text-vscode-text-secondary leading-relaxed">
+                  Trigger AI stall analysis when no output is received for this many seconds.
+                  Must be greater than the soft stall warning. Set to 0 to disable. Default: 45
+                </p>
+              </div>
             </div>
           </section>
         </div>

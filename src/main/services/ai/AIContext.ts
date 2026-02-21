@@ -50,11 +50,9 @@ export class AIContext {
   // ── Mode ────────────────────────────────────────────────────────
 
   addMode(mode: import('@shared/types').ExecutionMode): this {
-    const desc = mode === 'planner'
-      ? '**Mode: Planner** — Execute steps automatically in order. Stop on first failure. Be concise and actionable.'
-      : mode === 'agentic'
-        ? '**Mode: Agentic** — Execute steps automatically. On failure, analyse stderr and retry with a corrected command. Be concise and actionable.'
-        : '**Mode: Teacher** — Show commands with detailed explanations. Do NOT auto-execute; the user will copy commands manually.';
+    const desc = mode === 'agent'
+      ? '**Mode: Agent** — Execute steps automatically. On failure, analyse stderr and retry with a corrected command. Be concise and actionable.'
+      : '**Mode: Manual** — The user will trigger each step individually. Generate clear, concise steps with explanations so the user understands what each command does.';
 
     this.blocks.push({
       priority: 0,

@@ -4,12 +4,14 @@
 
 /**
  * Execution mode for the plan executor.
- * - 'teacher'  : manual, user runs each step; no auto-correction
- * - 'planner'  : automatic linear execution; stops on failure (formerly 'fixer')
- * - 'agentic'  : automatic linear execution; on failure enters Agent Loop to
- *                diagnose, generate fix steps, and retry
+ * - 'manual' : per-step execution; user clicks Run on each individual step;
+ *              full execution pipeline (risk check, output capture, approval gate);
+ *              no automatic advancement between steps
+ * - 'agent'  : fully autonomous execution; single Run button at the top;
+ *              on step failure enters Agent Loop to diagnose, generate fix
+ *              steps, and retry automatically
  */
-export type ExecutionMode = 'teacher' | 'planner' | 'agentic';
+export type ExecutionMode = 'manual' | 'agent';
 
 /**
  * Lightweight DTO sent over IPC from renderer → main when submitting a message.

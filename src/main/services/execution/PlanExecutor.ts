@@ -30,6 +30,11 @@ export interface PlanExecutorConfig {
   osInfo: OSInfo;
   mode: ExecutionMode;
   connectionId: string;
+  /**
+   * Manual mode only: execute exactly this step index and then stop.
+   * When undefined the full plan is executed from plan.currentStepIndex.
+   */
+  singleStepIndex?: number;
 }
 
 //  Circuit-breaker constants 
@@ -84,7 +89,9 @@ export class PlanExecutor {
     await sessionStore.saveExecutionRecord(config.connectionId, record);
 
     try {
-      let i = plan.currentStepIndex;
+      // In manual mode with a singleStepIndex, start exactly at that step.
+      // Otherwise start from the plan's current position (normal / agent mode).
+      let i = config.singleStepIndex ?? plan.currentStepIndex;
 
       while (i < plan.steps.length) {
         // Cancellation check
@@ -131,6 +138,16 @@ export class PlanExecutor {
           plan.currentStepIndex = i + 1;
           plan.steps[i].status = 'completed';
           await sessionStore.addStepResult(config.connectionId, plan.id, stepResult);
+
+          // Manual single-step: one step done — signal completion and stop.
+          if (config.singleStepIndex !== undefined) {
+            yield { type: 'plan-completed', results: completedSteps };
+            await sessionStore.updateExecutionRecord(config.connectionId, plan.id, {
+              status: 'completed', completedAt: new Date().toISOString(),
+            });
+            return;
+          }
+
           i++;
           continue;
         }
@@ -139,8 +156,8 @@ export class PlanExecutor {
         plan.steps[i].status = 'failed';
         await sessionStore.addStepResult(config.connectionId, plan.id, stepResult);
 
-        // Planner / Teacher: stop immediately
-        if (config.mode !== 'agentic') {
+        // Manual mode: stop immediately (no agent recovery)
+        if (config.mode !== 'agent') {
           completedSteps.push(stepResult);
           yield {
             type: 'plan-cancelled',
@@ -179,6 +196,16 @@ export class PlanExecutor {
 
         // Ask AgentBrain
         const correction = await agentBrain.analyzeFailure(step, stepResult, agentCtx);
+
+        // Check cancellation: user may have cancelled while the AI call was in-flight
+        if (this.isCancelled) {
+          yield { type: 'plan-cancelled', reason: 'Cancelled by user', completedSteps: completedSteps.length };
+          await sessionStore.updateExecutionRecord(config.connectionId, plan.id, {
+            status: 'cancelled', completedAt: new Date().toISOString(),
+          });
+          return;
+        }
+
         totalCorrections++;
         console.log(`[PlanExecutor] Agent action=${correction.action} step=${i}: ${correction.reasoning}`);
 

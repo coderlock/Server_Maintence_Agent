@@ -75,8 +75,8 @@ const electronAPI = {
   
   // Plan Operations
   plan: {
-    execute: (planId: string, mode: ExecutionMode) =>
-      ipcRenderer.invoke(IPC_CHANNELS.PLAN.EXECUTE, planId, mode),
+    execute: (planId: string, mode: ExecutionMode, stepIndex?: number) =>
+      ipcRenderer.invoke(IPC_CHANNELS.PLAN.EXECUTE, planId, mode, stepIndex),
     approve: (stepId: string) =>
       ipcRenderer.send(IPC_CHANNELS.PLAN.APPROVAL_RESPONSE, { decision: 'approve', stepId }),
     reject: (stepId: string) =>
@@ -89,6 +89,9 @@ const electronAPI = {
       ipcRenderer.send(IPC_CHANNELS.PLAN.RESUME),
     cancel: () =>
       ipcRenderer.send(IPC_CHANNELS.PLAN.CANCEL),
+    /** Sprint 8: Submit user input in response to a detected interactive prompt */
+    submitPromptInput: (stepId: string, input: string) =>
+      ipcRenderer.send(IPC_CHANNELS.PLAN.PROMPT_INPUT, { stepId, input }),
     /** Subscribe to the PlanEvent stream */
     onEvent: (callback: (event: any) => void) => {
       const handler = (_: any, event: any) => callback(event);

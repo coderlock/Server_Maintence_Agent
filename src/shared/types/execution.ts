@@ -99,12 +99,45 @@ export interface AgentCorrection {
 }
 
 /**
+ * Configuration for a single plan execution run.
+ * Created in plan.handler.ts from AppSettings and passed to the strategy factory.
+ */
+export interface ExecutionConfig {
+  /**
+   * 'batch'         — SSH exec channel; full output on completion; stderr separated.
+   * 'real-terminal' — Commands typed into the live PTY; output captured via markers.
+   * 'streaming'     — SSH exec channel; real-time chunk events (Sprint 8).
+   */
+  outputMode: 'batch' | 'real-terminal' | 'streaming';
+
+  /** Maximum time to wait for a single command before sending Ctrl+C. */
+  commandTimeoutMs: number;
+
+  /** Maximum bytes of captured stdout before truncation. */
+  maxOutputBytes: number;
+
+  /** Maximum bytes of captured stderr before truncation (batch/streaming only). */
+  maxStderrBytes: number;
+
+  /** Seconds of silence before soft stall warning. 0 = disabled. */
+  idleWarningSeconds: number;
+  /** Seconds of silence before hard stall + AI analysis. 0 = disabled. */
+  idleStalledSeconds: number;
+}
+
+/**
  * Events emitted during plan execution over IPC.
  * Extensible union — the renderer handles known types and ignores unknown ones,
  * so future agent events can be added here without breaking existing UI code.
  */
 export type PlanEvent =
   | { type: 'step-started'; stepId: string; stepIndex: number; command: string }
+  /**
+   * Real-time output chunk from the currently executing step.
+   * Fired while the command is still running (one or more times per step).
+   * In real-terminal mode, stream is always 'stdout' (stderr is merged).
+   */
+  | { type: 'step-output'; stepId: string; chunk: string; stream: 'stdout' | 'stderr' }
   | { type: 'step-completed'; stepId: string; result: StepResult }
   | { type: 'step-failed'; stepId: string; result: StepResult }
   | { type: 'step-skipped'; stepId: string; reason: string }
@@ -117,4 +150,35 @@ export type PlanEvent =
   | { type: 'retry-attempt'; stepId: string; attempt: number; maxAttempts: number }
   | { type: 'agent-thinking'; message: string }
   | { type: 'agent-stuck'; reason: string; failedAttempts: number }
-  | { type: 'budget-warning'; iterationsRemaining: number; tokensUsed: number };
+  | { type: 'budget-warning'; iterationsRemaining: number; tokensUsed: number }
+  // Sprint 8 idle-timer / stall events
+  | {
+      type: 'prompt-detected';
+      stepId: string;
+      promptText: string;
+      matchedPattern: string;
+      /** Where the detection was triggered from. */
+      source: 'realtime' | 'idle-warning' | 'idle-stalled';
+    }
+  | {
+      /** Soft stall — command has been silent, no prompt found. Informational. */
+      type: 'idle-warning';
+      stepId: string;
+      silenceSeconds: number;
+    }
+  | {
+      /** Hard stall — AI has analysed the situation. */
+      type: 'stall-detected';
+      stepId: string;
+      silenceSeconds: number;
+      /** null while analysis is in progress, then set to the agent's decision. */
+      agentAction: 'abort' | 'wait' | 'send-input' | 'skip' | null;
+      agentReasoning: string;
+    }
+  | {
+      /** User submitted input via the StallIndicator form. */
+      type: 'stall-input-submitted';
+      stepId: string;
+      /** Redacted to '***' if it contains 'password'. */
+      input: string;
+    };

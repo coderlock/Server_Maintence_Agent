@@ -1,7 +1,7 @@
 import React, { useRef, useEffect, useState, useCallback } from 'react';
 import {
   MessageSquare, Send, StopCircle, Trash2,
-  GraduationCap, Wrench, User, Bot, AlertTriangle, ChevronDown, ChevronRight,
+  Hand, Zap, User, Bot, AlertTriangle, ChevronDown, ChevronRight,
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
@@ -21,40 +21,28 @@ const ModeToggle: React.FC = () => {
   return (
     <div className="flex items-center gap-1 bg-[#1e1e1e] rounded p-0.5">
       <button
-        onClick={() => setMode('planner')}
+        onClick={() => setMode('manual')}
         className={`flex items-center gap-1 px-2 py-0.5 rounded text-xs transition-colors ${
-          mode === 'planner'
+          mode === 'manual'
             ? 'bg-vscode-accent text-white'
             : 'text-vscode-text-secondary hover:text-vscode-text'
         }`}
-        title="Planner mode — AI executes steps linearly, stops on failure"
+        title="Manual mode — click Run on each step individually"
       >
-        <Wrench className="h-3 w-3" />
-        Planner
+        <Hand className="h-3 w-3" />
+        Manual
       </button>
       <button
-        onClick={() => setMode('agentic')}
+        onClick={() => setMode('agent')}
         className={`flex items-center gap-1 px-2 py-0.5 rounded text-xs transition-colors ${
-          mode === 'agentic'
-            ? 'bg-vscode-accent text-white'
+          mode === 'agent'
+            ? 'bg-purple-600 text-white'
             : 'text-vscode-text-secondary hover:text-vscode-text'
         }`}
-        title="Agentic mode — AI self-corrects on failure"
+        title="Agent mode — run the whole plan autonomously, self-corrects on failure"
       >
-        <Wrench className="h-3 w-3" />
-        Agentic
-      </button>
-      <button
-        onClick={() => setMode('teacher')}
-        className={`flex items-center gap-1 px-2 py-0.5 rounded text-xs transition-colors ${
-          mode === 'teacher'
-            ? 'bg-vscode-accent text-white'
-            : 'text-vscode-text-secondary hover:text-vscode-text'
-        }`}
-        title="Teacher mode — AI explains without executing"
-      >
-        <GraduationCap className="h-3 w-3" />
-        Teacher
+        <Zap className="h-3 w-3" />
+        Agent
       </button>
     </div>
   );
@@ -225,9 +213,17 @@ export const ChatPanel: React.FC = () => {
   const [inputValue, setInputValue] = useState('');
   const [showScrollButton, setShowScrollButton] = useState(false);
   const [hasApiKey, setHasApiKey] = useState(true);
+  const [planHeight, setPlanHeight] = useState(() => {
+    const saved = localStorage.getItem('planPanelHeight');
+    return saved ? parseInt(saved, 10) : 260;
+  });
+  const [isDraggingPlan, setIsDraggingPlan] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const chatContainerRef = useRef<HTMLDivElement>(null);
+  const planHeightRef = useRef(planHeight);
+  planHeightRef.current = planHeight;
 
   const isConnected = activeConnection?.status === 'connected';
 
@@ -286,8 +282,36 @@ export const ChatPanel: React.FC = () => {
     ta.style.height = `${Math.min(ta.scrollHeight, 120)}px`;
   }, [inputValue]);
 
+  // Vertical drag-to-resize for plan panel
+  useEffect(() => {
+    if (!isDraggingPlan) return;
+    const handleMouseMove = (e: MouseEvent) => {
+      const container = chatContainerRef.current;
+      if (!container) return;
+      const rect = container.getBoundingClientRect();
+      const headerHeight = 36; // h-9 = 36px
+      const newHeight = e.clientY - rect.top - headerHeight;
+      const maxHeight = (rect.height - headerHeight) * 0.75;
+      setPlanHeight(Math.max(80, Math.min(Math.round(newHeight), Math.round(maxHeight))));
+    };
+    const handleMouseUp = () => {
+      setIsDraggingPlan(false);
+      localStorage.setItem('planPanelHeight', planHeightRef.current.toString());
+    };
+    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('mouseup', handleMouseUp);
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [isDraggingPlan]);
+
   return (
-    <div className="h-full bg-vscode-panel flex flex-col relative">
+    <div
+      ref={chatContainerRef}
+      className="h-full bg-vscode-panel flex flex-col relative"
+      style={{ cursor: isDraggingPlan ? 'row-resize' : undefined }}
+    >
       {/* Header */}
       <div className="h-9 bg-[#252526] border-b border-vscode-border flex items-center px-3 gap-2 flex-shrink-0">
         <MessageSquare className="h-4 w-4 text-vscode-text-secondary flex-shrink-0" />
@@ -306,9 +330,25 @@ export const ChatPanel: React.FC = () => {
 
       {/* Plan Execution Panel */}
       {hasPlan && (
-        <div className="flex-shrink-0 border-b border-[#3e3e3e] overflow-y-auto" style={{ maxHeight: '45%' }}>
-          <PlanView execution={planExecution} />
-        </div>
+        <>
+          <div
+            className="flex-shrink-0 overflow-y-auto"
+            style={{ height: planHeight }}
+          >
+            <PlanView execution={planExecution} />
+          </div>
+          {/* Draggable horizontal divider */}
+          <div
+            className="flex-shrink-0 h-1.5 bg-vscode-border hover:bg-vscode-accent cursor-row-resize transition-colors group relative"
+            onMouseDown={() => setIsDraggingPlan(true)}
+            title="Drag to resize"
+          >
+            {/* Grab handle dots */}
+            <div className="absolute inset-0 flex items-center justify-center gap-0.5 opacity-40 group-hover:opacity-80 transition-opacity pointer-events-none">
+              <span className="w-4 h-0.5 rounded-full bg-current" />
+            </div>
+          </div>
+        </>
       )}
 
       {/* Messages */}

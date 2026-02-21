@@ -20,7 +20,7 @@ export interface AppSettings {
   splitPanePosition: number;
   
   // Behavior Settings
-  defaultMode: 'planner' | 'teacher' | 'agentic';
+  defaultMode: 'manual' | 'agent';
   autoSaveSession: boolean;
   confirmDangerousCommands: boolean;
   
@@ -31,6 +31,33 @@ export interface AppSettings {
   // Risk Classification
   customDangerousPatterns: string[];
   customSafePatterns: string[];
+
+  /**
+   * How plan commands are executed on the remote device.
+   *
+   * 'batch'         — Commands run via a separate SSH exec channel.
+   *                    Output appears in the terminal after the command completes.
+   *                    stdout and stderr are separated.
+   *
+   * 'real-terminal' — Commands are typed directly into the live terminal session.
+   *                    Output appears in real time with full colour and formatting.
+   *                    stdout and stderr are merged (PTY behaviour).
+   */
+  executionOutputMode: 'batch' | 'real-terminal';
+
+  /**
+   * Seconds of output silence before showing a soft stall warning on the step card.
+   * 0 = disabled.
+   * Default: 15
+   */
+  idleWarningSeconds: number;
+
+  /**
+   * Seconds of output silence before triggering AI stall analysis.
+   * Must be > idleWarningSeconds (or 0 to disable).
+   * Default: 45
+   */
+  idleStalledSeconds: number;
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -47,7 +74,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   theme: 'dark',
   splitPanePosition: 50,
   
-  defaultMode: 'planner',
+  defaultMode: 'manual',
   autoSaveSession: true,
   confirmDangerousCommands: true,
   
@@ -56,4 +83,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   
   customDangerousPatterns: [],
   customSafePatterns: [],
+
+  executionOutputMode: 'batch',
+  idleWarningSeconds: 15,
+  idleStalledSeconds: 45,
 };

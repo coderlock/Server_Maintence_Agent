@@ -35,6 +35,7 @@ export const IPC_CHANNELS = {
     STEP_UPDATE: 'plan:step-update',
     APPROVAL_NEEDED: 'plan:approval-needed',
     APPROVAL_RESPONSE: 'plan:approval-response', // renderer → main: approve/reject/skip
+    PROMPT_INPUT: 'plan:prompt-input',             // renderer → main: user response to detected prompt
     APPROVE: 'plan:approve',
     REJECT: 'plan:reject',
     PAUSE: 'plan:pause',
