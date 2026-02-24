@@ -85,17 +85,24 @@ export async function detectShellType(
   executeCommand: (cmd: string) => Promise<string>,
 ): Promise<'bash' | 'zsh' | 'unknown'> {
   try {
-    const shell0 = (await executeCommand('echo $0')).trim().toLowerCase();
-    if (shell0.includes('bash') || shell0 === '-bash') return 'bash';
-    if (shell0.includes('zsh')) return 'zsh';
+    // Single command that is reliable in both interactive and non-interactive
+    // exec contexts. $BASH_VERSION / $ZSH_VERSION are set by the shell itself,
+    // so they work regardless of how the exec channel invokes the shell.
+    // Falls back to $SHELL (the login-shell path from /etc/passwd) if neither
+    // version variable is set (e.g. the user's login shell is /bin/sh).
+    const result = (await executeCommand(
+      'if [ -n "$BASH_VERSION" ]; then echo bash; ' +
+      'elif [ -n "$ZSH_VERSION" ]; then echo zsh; ' +
+      'else echo "$SHELL"; fi',
+    )).trim().toLowerCase();
 
-    // Fallback: check $SHELL env var
-    const shellEnv = (await executeCommand('echo $SHELL')).trim().toLowerCase();
-    if (shellEnv.includes('bash')) return 'bash';
-    if (shellEnv.includes('zsh')) return 'zsh';
+    console.log('[Session] detectShellType raw result:', JSON.stringify(result));
 
+    if (result === 'bash' || result.includes('/bash')) return 'bash';
+    if (result === 'zsh'  || result.includes('/zsh'))  return 'zsh';
     return 'unknown';
-  } catch {
+  } catch (err) {
+    console.warn('[Session] detectShellType failed:', err);
     return 'unknown';
   }
 }
@@ -229,11 +236,10 @@ export async function initializeSession(
   username: string,
   _configHost: string,
 ): Promise<ShellSessionInfo> {
-  // Run both detections in parallel — neither depends on the other.
-  const [shellType, actualHostname] = await Promise.all([
-    detectShellType(executeCommand),
-    detectActualHostname(executeCommand),
-  ]);
+  // Run sequentially — some SSH servers reject concurrent exec channels,
+  // which would cause one detection to silently fail and fall back to markers.
+  const shellType      = await detectShellType(executeCommand);
+  const actualHostname = await detectActualHostname(executeCommand);
 
   const promptRegex = actualHostname
     ? buildPromptRegex(username, actualHostname)

@@ -12,6 +12,7 @@ import { useCallback, useEffect, useReducer } from 'react';
 import type { ExecutionPlan } from '@shared/types';
 import type { PlanEvent, StepResult } from '@shared/types/execution';
 import type { StepStallState } from '../components/plan/StallIndicator';
+import { useChatStore } from '../store/chatStore';
 
 // ── State ──────────────────────────────────────────────────────────────────
 
@@ -306,6 +307,17 @@ export function usePlanExecution() {
   // Subscribe to events from main process
   useEffect(() => {
     const unsubEvent = window.electronAPI.plan.onEvent((event: PlanEvent) => {
+      // `plan-summary` is not a plan-state event — post it directly to the
+      // chat panel as an assistant message and don't touch reducer state.
+      if (event.type === 'plan-summary') {
+        useChatStore.getState().addMessage({
+          id: `plan-summary-${Date.now()}`,
+          role: 'assistant',
+          content: event.content,
+          timestamp: new Date().toISOString(),
+        });
+        return;
+      }
       dispatch({ type: 'PLAN_EVENT', event });
     });
 

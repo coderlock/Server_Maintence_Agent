@@ -317,6 +317,12 @@ export function registerPlanHandlers(mainWindow: BrowserWindow): void {
     // Run executor in the background — IPC handle returns immediately
     (async () => {
       if (!activePlanExecutor) return;
+
+      /** Accumulate step results locally so we can pass them to the plan summary. */
+      const collectedResults = new Map<string, import('@shared/types/execution').StepResult>();
+      let finalStatus: 'completed' | 'cancelled' | 'failed' = 'failed';
+      let cancellationReason: string | undefined;
+
       try {
         for await (const event of activePlanExecutor.execute(plan, {
           connection, osInfo, mode: executionMode, connectionId,
@@ -333,6 +339,19 @@ export function registerPlanHandlers(mainWindow: BrowserWindow): void {
             event.type === 'step-skipped'
           ) {
             activeStepId = '';
+          }
+
+          // Collect step results for the post-execution summary
+          if (event.type === 'step-completed' || event.type === 'step-failed') {
+            collectedResults.set(event.stepId, event.result);
+          }
+
+          // Track final plan status
+          if (event.type === 'plan-completed') {
+            finalStatus = 'completed';
+          } else if (event.type === 'plan-cancelled') {
+            finalStatus = 'cancelled';
+            cancellationReason = event.reason;
           }
 
           // Mirror command output to the xterm terminal panel.
@@ -374,6 +393,8 @@ export function registerPlanHandlers(mainWindow: BrowserWindow): void {
           reason,
           completedSteps: 0,
         } as PlanEvent);
+        finalStatus = 'failed';
+        cancellationReason = reason;
         commandExecutor.dispose();
         activePlanExecutor = null;
         activeCommandExecutor = null;
@@ -381,6 +402,25 @@ export function registerPlanHandlers(mainWindow: BrowserWindow): void {
         executionCancelled = false;
         // Write a newline to the live PTY so the shell re-displays its real prompt
         sshManager.write('\n');
+      }
+
+      // ── Post-execution: generate and emit an AI summary to the chat panel ──
+      // Only emit when the plan ran at least one step (skip trivial empty runs)
+      if (collectedResults.size > 0 || finalStatus === 'completed') {
+        try {
+          const summaryContent = await agentBrain.generatePlanSummary(
+            plan,
+            collectedResults,
+            finalStatus,
+            cancellationReason,
+          );
+          send(IPC_CHANNELS.PLAN.EVENT, {
+            type: 'plan-summary',
+            content: summaryContent,
+          } satisfies PlanEvent);
+        } catch (summaryErr) {
+          console.error('[Plan] Failed to generate plan summary:', summaryErr);
+        }
       }
     })();
 

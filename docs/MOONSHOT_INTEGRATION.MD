@@ -12,7 +12,7 @@ The MVP will use **Moonshot's Kimi 2.5** model instead of Anthropic's Claude for
 ### API Key
 - **Environment Variable:** `MOONSHOT_API_KEY`
 - **Location:** `.env.local` (already configured)
-- **Value:** `sk-Cw6PyhPqi1YR28bBMsXwVrQibTi51D9if94Nin1BceGK8IyU`
+- **Value:** `sk-xxx`
 
 ### Model Settings (in settings.ts)
 ```typescript

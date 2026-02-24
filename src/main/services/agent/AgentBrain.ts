@@ -11,7 +11,7 @@
  *  - Never throws — caller handles fallback via the 'abort' action
  */
 
-import type { PlanStep } from '@shared/types';
+import type { PlanStep, ExecutionPlan } from '@shared/types';
 import type { AgentCorrection, ProtoStep, StepResult } from '@shared/types/execution';
 import { aiOrchestrator } from '../ai/AIOrchestrator';
 import type { AgentContext } from './AgentContext';
@@ -261,6 +261,109 @@ export class AgentBrain {
         reasoning: `AI call failed: ${err instanceof Error ? err.message : String(err)}`,
       };
     }
+  }
+
+  // ── Plan summary ────────────────────────────────────────────────────────
+
+  /**
+   * Generate a markdown summary of a completed (or cancelled/failed) plan run.
+   *
+   * Called by plan.handler.ts immediately after the execution generator exhausts.
+   * The summary is sent to the renderer as a `plan-summary` PlanEvent so it
+   * appears as an assistant message in the chat panel.
+   *
+   * Never throws — on any error returns a minimal fallback summary so the
+   * chat panel always receives something useful.
+   */
+  async generatePlanSummary(
+    plan: ExecutionPlan,
+    stepResults: Map<string, StepResult>,
+    finalStatus: 'completed' | 'cancelled' | 'failed',
+    cancellationReason?: string,
+  ): Promise<string> {
+    const steps = plan.steps.map((s, idx) => {
+      const result = stepResults.get(s.id);
+      const status = result?.assessment?.succeeded
+        ? '✅ succeeded'
+        : result
+          ? `❌ failed — ${result.assessment?.reason ?? 'no assessment'}`
+          : s.status === 'skipped'
+            ? '⏭️ skipped'
+            : '⏸️ not executed';
+      return `${idx + 1}. **${s.description}** — ${status}`;
+    }).join('\n');
+
+    const succeeded = [...stepResults.values()].filter(r => r.assessment?.succeeded).length;
+    const total = plan.steps.length;
+
+    // Fast path: no AI available — build a deterministic summary
+    if (!aiOrchestrator.isInitialized()) {
+      const outcomeLine = finalStatus === 'completed'
+        ? `✅ **Plan completed** — all ${total} step(s) finished successfully.`
+        : finalStatus === 'cancelled'
+          ? `⚠️ **Plan cancelled** — ${cancellationReason ?? 'cancelled by user'}.`
+          : `❌ **Plan failed** — ${cancellationReason ?? 'a step could not be completed'}.`;
+
+      return [
+        `## Agent Summary`,
+        '',
+        outcomeLine,
+        '',
+        `**Goal:** ${plan.goal}`,
+        `**Progress:** ${succeeded} / ${total} steps completed`,
+        '',
+        '### Steps',
+        steps,
+      ].join('\n');
+    }
+
+    const systemPrompt = `You are an AI server maintenance assistant summarizing a completed automated plan run.
+Write a concise, human-friendly markdown summary (no JSON, no code blocks) covering:
+1. A one-line outcome header (succeeded / failed / cancelled and why)
+2. The original goal
+3. A brief summary of what was accomplished (skip trivially obvious details)
+4. Any errors or issues encountered, explained plainly
+5. Specific, actionable next steps for the operator if anything needs attention — otherwise a short confirmation that no action is required
+
+Keep it under 300 words. Use bullet points for next steps. Do not repeat the full step list verbatim.`;
+
+    const userMessage = [
+      `**Plan goal:** ${plan.goal}`,
+      `**Final status:** ${finalStatus}`,
+      cancellationReason ? `**Reason for non-completion:** ${cancellationReason}` : '',
+      `**Steps completed:** ${succeeded} / ${total}`,
+      '',
+      '**Step-by-step results:**',
+      steps,
+    ].filter(Boolean).join('\n');
+
+    try {
+      const response = await aiOrchestrator.callRaw(systemPrompt, [
+        { role: 'user', content: userMessage },
+      ]);
+      return response.content.trim() || this._fallbackSummary(plan, finalStatus, succeeded, total, cancellationReason);
+    } catch (err) {
+      console.error('[AgentBrain] generatePlanSummary AI call failed:', err);
+      return this._fallbackSummary(plan, finalStatus, succeeded, total, cancellationReason);
+    }
+  }
+
+  private _fallbackSummary(
+    plan: ExecutionPlan,
+    finalStatus: string,
+    succeeded: number,
+    total: number,
+    reason?: string,
+  ): string {
+    const icon = finalStatus === 'completed' ? '✅' : finalStatus === 'cancelled' ? '⚠️' : '❌';
+    return [
+      `## Agent Summary`,
+      '',
+      `${icon} **${finalStatus.charAt(0).toUpperCase() + finalStatus.slice(1)}** — ${reason ?? (finalStatus === 'completed' ? 'all steps finished' : 'see terminal for details')}`,
+      '',
+      `**Goal:** ${plan.goal}`,
+      `**Progress:** ${succeeded} / ${total} steps completed`,
+    ].join('\n');
   }
 }
 

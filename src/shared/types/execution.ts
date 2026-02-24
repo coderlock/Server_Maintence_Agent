@@ -181,4 +181,13 @@ export type PlanEvent =
       stepId: string;
       /** Redacted to '***' if it contains 'password'. */
       input: string;
+    }
+  | {
+      /**
+       * AI-generated markdown summary posted to the chat panel after a plan
+       * finishes (completed, cancelled, or aborted by the agent).
+       */
+      type: 'plan-summary';
+      /** Markdown content to display as an assistant chat message. */
+      content: string;
     };
