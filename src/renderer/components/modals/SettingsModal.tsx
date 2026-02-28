@@ -24,7 +24,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
   const [temperature, setTemperature] = useState(settings.aiTemperature);
   const [maxTokens, setMaxTokens] = useState(settings.aiMaxTokens);
   const [model, setModel] = useState(settings.aiModel);
-  const [provider, setProvider] = useState<'openai' | 'moonshot'>(settings.aiProvider ?? 'moonshot');
+  const [provider, setProvider] = useState<'openai' | 'moonshot' | 'anthropic'>(settings.aiProvider ?? 'openai');
   const [defaultMode, setDefaultMode] = useState(settings.defaultMode);
   const [confirmDangerous, setConfirmDangerous] = useState(settings.confirmDangerousCommands);
   const [executionOutputMode, setExecutionOutputMode] = useState<'batch' | 'real-terminal'>(settings.executionOutputMode ?? 'batch');
@@ -135,15 +135,18 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
                 <select
                   value={provider}
                   onChange={e => {
-                    const p = e.target.value as 'openai' | 'moonshot';
+                    const p = e.target.value as 'openai' | 'moonshot' | 'anthropic';
                     setProvider(p);
                     // Reset model to a sensible default for the selected provider
-                    setModel(p === 'openai' ? 'gpt-4o' : 'kimi-k2.5');
+                    if (p === 'openai') setModel('gpt-4o');
+                    else if (p === 'anthropic') setModel('claude-opus-4-5');
+                    else setModel('kimi-k2.5');
                   }}
                   className="w-full bg-[#3c3c3c] text-vscode-text text-sm rounded px-3 py-2 outline-none border border-transparent focus:border-vscode-accent"
                 >
                   <option value="openai">OpenAI</option>
                   <option value="moonshot">Moonshot (Kimi)</option>
+                  <option value="anthropic">Anthropic (Claude)</option>
                 </select>
               </div>
 
@@ -158,7 +161,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
               {/* API key input */}
               <div>
                 <label className="block text-xs text-vscode-text-secondary mb-1.5">
-                  {provider === 'openai' ? 'OpenAI API Key' : 'Moonshot API Key'}{hasStoredKey && <span className="text-yellow-400"> (enter new key to replace)</span>}
+                  {provider === 'openai' ? 'OpenAI API Key' : provider === 'anthropic' ? 'Anthropic API Key' : 'Moonshot API Key'}{hasStoredKey && <span className="text-yellow-400"> (enter new key to replace)</span>}
                 </label>
                 <div className="flex gap-2">
                   <div className="relative flex-1">
@@ -210,9 +213,13 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
                     <a href="https://platform.openai.com/api-keys" target="_blank" rel="noreferrer" className="text-vscode-accent hover:underline">
                       platform.openai.com
                     </a>
+                  ) : provider === 'anthropic' ? (
+                    <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noreferrer" className="text-vscode-accent hover:underline">
+                      console.anthropic.com
+                    </a>
                   ) : (
-                    <a href="https://platform.moonshot.cn/" target="_blank" rel="noreferrer" className="text-vscode-accent hover:underline">
-                      platform.moonshot.cn
+                    <a href="https://platform.moonshot.ai/" target="_blank" rel="noreferrer" className="text-vscode-accent hover:underline">
+                      platform.moonshot.ai
                     </a>
                   )}
                 </p>
@@ -228,6 +235,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
                 >
                   {provider === 'openai' ? (
                     <>
+                      <optgroup label="GPT-5">
+                        <option value="gpt-5">gpt-5 — Flagship model</option>
+                        <option value="gpt-5-mini">gpt-5-mini — Fast &amp; affordable</option>
+                      </optgroup>
                       <optgroup label="GPT-4o">
                         <option value="gpt-4o">gpt-4o — Latest multimodal (recommended)</option>
                         <option value="gpt-4o-mini">gpt-4o-mini — Fast &amp; affordable</option>
@@ -240,6 +251,21 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
                       <optgroup label="o-series (Reasoning)">
                         <option value="o3">o3 — Advanced reasoning</option>
                         <option value="o4-mini">o4-mini — Fast reasoning</option>
+                      </optgroup>
+                    </>
+                  ) : provider === 'anthropic' ? (
+                    <>
+                      <optgroup label="Claude 4 (Latest)">
+                        <option value="claude-opus-4-5">claude-opus-4-5 — Most capable (recommended)</option>
+                        <option value="claude-sonnet-4-5">claude-sonnet-4-5 — Balanced speed &amp; intelligence</option>
+                      </optgroup>
+                      <optgroup label="Claude 3.5">
+                        <option value="claude-3-5-sonnet-20241022">claude-3-5-sonnet — High intelligence</option>
+                        <option value="claude-3-5-haiku-20241022">claude-3-5-haiku — Fast &amp; affordable</option>
+                      </optgroup>
+                      <optgroup label="Claude 3">
+                        <option value="claude-3-opus-20240229">claude-3-opus — Powerful, complex tasks</option>
+                        <option value="claude-3-haiku-20240307">claude-3-haiku — Fastest &amp; most compact</option>
                       </optgroup>
                     </>
                   ) : (

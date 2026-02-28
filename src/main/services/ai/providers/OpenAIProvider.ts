@@ -4,6 +4,21 @@ import type { LLMProvider, LLMMessage, LLMResponse, LLMStreamHandler } from './L
 const OPENAI_BASE_URL = 'https://api.openai.com/v1';
 const DEFAULT_MODEL = 'gpt-4o';
 
+// Models that require `max_completion_tokens` and do not support custom temperature
+function isNewParamModel(model: string): boolean {
+  return /^(o\d|gpt-5)/i.test(model);
+}
+
+function tokenLimitParam(model: string, limit: number): Record<string, number> {
+  return isNewParamModel(model)
+    ? { max_completion_tokens: limit }
+    : { max_tokens: limit };
+}
+
+function temperatureParam(model: string, temp: number): Record<string, number> {
+  return isNewParamModel(model) ? {} : { temperature: temp };
+}
+
 export class OpenAIProvider implements LLMProvider {
   private client: OpenAI | null = null;
   private model: string = DEFAULT_MODEL;
@@ -45,8 +60,8 @@ export class OpenAIProvider implements LLMProvider {
 
     const params = {
       model: this.model,
-      max_tokens: 4096,
-      temperature: 0.6,
+      ...tokenLimitParam(this.model, 4096),
+      ...temperatureParam(this.model, 0.6),
       messages: [
         { role: 'system' as const, content: systemPrompt },
         ...messages.map(m => ({ role: m.role as 'user' | 'assistant', content: m.content })),
@@ -95,8 +110,8 @@ export class OpenAIProvider implements LLMProvider {
     try {
       const stream = await this.client.chat.completions.create({
         model: this.model,
-        max_tokens: 4096,
-        temperature: 0.6,
+        ...tokenLimitParam(this.model, 4096),
+        ...temperatureParam(this.model, 0.6),
         messages: [
           { role: 'system' as const, content: systemPrompt },
           ...messages.map(m => ({ role: m.role as 'user' | 'assistant', content: m.content })),

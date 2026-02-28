@@ -45,7 +45,7 @@ export const ConnectionUpdateSchema = z.object({
 // ── Settings ───────────────────────────────────────────────────────────────
 
 export const AppSettingsUpdateSchema = z.object({
-  aiProvider: z.enum(['moonshot', 'openai']).optional(),
+  aiProvider: z.enum(['moonshot', 'openai', 'anthropic']).optional(),
   aiModel: z.string().min(1).max(100).optional(),
   aiTemperature: z.number().min(0).max(2).optional(),
   aiMaxTokens: z.number().int().min(1).max(200000).optional(),

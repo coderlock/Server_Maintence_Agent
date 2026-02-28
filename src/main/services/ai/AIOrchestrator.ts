@@ -9,6 +9,7 @@ function uuidv4(): string {
 import { IPC_CHANNELS } from '@shared/constants/ipcChannels';
 import { moonshotProvider } from './providers/MoonshotProvider';
 import { openaiProvider } from './providers/OpenAIProvider';
+import { anthropicProvider } from './providers/AnthropicProvider';
 import { contextBuilder } from './ContextBuilder';
 import { storePlan } from '../../ipc/plan.handler';
 import { AIContext } from './AIContext';
@@ -57,6 +58,8 @@ export class AIOrchestrator {
   setProvider(name: string): void {
     if (name === 'openai') {
       this.provider = openaiProvider;
+    } else if (name === 'anthropic') {
+      this.provider = anthropicProvider;
     } else {
       this.provider = moonshotProvider;
     }

@@ -4,7 +4,7 @@
 
 export interface AppSettings {
   // AI Settings
-  aiProvider: 'moonshot' | 'openai';
+  aiProvider: 'moonshot' | 'openai' | 'anthropic';
   aiModel: string;
   aiTemperature: number;
   aiMaxTokens: number;

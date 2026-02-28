@@ -1,7 +1,7 @@
 import OpenAI from 'openai';
 import type { LLMProvider, LLMMessage, LLMResponse, LLMStreamHandler } from './LLMProvider';
 
-const MOONSHOT_BASE_URL = 'https://api.moonshot.cn/v1';
+const MOONSHOT_BASE_URL = 'https://api.moonshot.ai/v1';
 const DEFAULT_MODEL = 'kimi-k2.5';
 
 /**
@@ -23,8 +23,10 @@ export class MoonshotProvider implements LLMProvider {
   private model: string = DEFAULT_MODEL;
 
   initialize(apiKey: string): void {
+    const cleanKey = apiKey.trim();
+    console.log('[MoonshotProvider] initialize() — key prefix:', cleanKey.slice(0, 10), '| length:', cleanKey.length);
     this.client = new OpenAI({
-      apiKey,
+      apiKey: cleanKey,
       baseURL: MOONSHOT_BASE_URL,
     });
   }
@@ -116,7 +118,11 @@ export class MoonshotProvider implements LLMProvider {
         stopReason: 'stop',
         usage: { inputTokens, outputTokens },
       });
-    } catch (err) {
+    } catch (err: any) {
+      console.error('[MoonshotProvider] sendMessageStream() API error:');
+      console.error('  status :', err?.status ?? err?.statusCode ?? 'N/A');
+      console.error('  message:', err?.message ?? String(err));
+      console.error('  error  :', JSON.stringify(err?.error ?? err?.body ?? null, null, 2));
       handler.onError(err instanceof Error ? err : new Error(String(err)));
     }
   }

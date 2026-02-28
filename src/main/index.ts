@@ -80,6 +80,7 @@ app.whenReady().then(() => {
       "'self'",
       'https://api.anthropic.com',
       'https://api.moonshot.cn',
+      'https://api.moonshot.ai',
       'https://api.openai.com',
     ].join(' ');
 

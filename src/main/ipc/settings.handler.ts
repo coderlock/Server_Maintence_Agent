@@ -30,6 +30,10 @@ export function registerSettingsHandlers(): void {
           import('../services/ai/providers/OpenAIProvider').then(({ openaiProvider }) => {
             openaiProvider.setModel(safeUpdates.aiModel!);
           });
+        } else if (providerName === 'anthropic') {
+          import('../services/ai/providers/AnthropicProvider').then(({ anthropicProvider }) => {
+            anthropicProvider.setModel(safeUpdates.aiModel!);
+          });
         } else {
           import('../services/ai/providers/MoonshotProvider').then(({ moonshotProvider }) => {
             moonshotProvider.setModel(safeUpdates.aiModel!);
@@ -58,17 +62,19 @@ export function registerSettingsHandlers(): void {
     try {
       // Zod validates length and type before we do anything else
       const trimmed = validateIpcInput(ApiKeySchema, apiKey);
+
+      // Set the correct provider BEFORE validating so the right validator runs
+      const settings = await settingsStore.getSettings();
+      if (settings.aiProvider) {
+        aiOrchestrator.setProvider(settings.aiProvider);
+      }
+
       const isValid = await aiOrchestrator.validateApiKey(trimmed);
       if (!isValid) {
         return { success: false, error: 'API key is invalid. Please verify the key from your provider dashboard and try again.' };
       }
 
       await settingsStore.setApiKey(trimmed);
-      const settings = await settingsStore.getSettings();
-      // Ensure orchestrator is using the correct provider before initializing
-      if (settings.aiProvider) {
-        aiOrchestrator.setProvider(settings.aiProvider);
-      }
       aiOrchestrator.initialize(trimmed, settings.aiModel);
 
       console.log('[Settings] API key updated and AI re-initialized');

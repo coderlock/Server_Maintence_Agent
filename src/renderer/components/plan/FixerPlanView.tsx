@@ -335,10 +335,16 @@ export const FixerPlanView: React.FC<FixerPlanViewProps> = ({
       </div>
 
       {/* Progress bar */}
-      {isExecuting && (
+      {(isExecuting || completedCount > 0) && (
         <div className="w-full bg-[#2d2d2d] rounded-full h-1.5">
           <div
-            className="bg-vscode-accent h-1.5 rounded-full transition-all duration-500"
+            className={`h-1.5 rounded-full transition-all duration-500 ${
+              !isExecuting && plan.status === 'completed'
+                ? 'bg-green-500'
+                : !isExecuting && hasFailed
+                ? 'bg-red-500'
+                : 'bg-vscode-accent'
+            }`}
             style={{ width: `${progressPct}%` }}
           />
         </div>

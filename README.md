@@ -9,8 +9,8 @@ An autonomous AI agent that can update, fix, or improve any system on your netwo
 - "Run a security audit"
 
 ### Modes
-- **MANUAL**: Step-by-step mode — the agent proposes each command and waits for your approval before running anything.
-- **AGENT** (autonomous): The agent executes commands on its own and only prompts you when necessary (e.g., for sudo, file overwrites, or high-risk actions).
+- MANUAL: Step-by-step mode — the agent proposes each command and waits for your approval before running anything.
+- AGENT (autonomous): The agent executes commands on its own and only prompts you when necessary (e.g., for sudo, file overwrites, or high-risk actions).
 
 ## !! WARNINGS / IMPORTANT SAFETY NOTES !!
 - **This is extremely powerful and dangerous.** Even with built-in safeguards, giving an AI unrestricted SSH access can destroy data, break systems, expose security vulnerabilities, or worse. **Use at your own risk.**
@@ -21,6 +21,11 @@ An autonomous AI agent that can update, fix, or improve any system on your netwo
 **Strong recommendation**: Only use this on **test / disposable servers** or VMs. Never point it at production, critical infrastructure, or any system containing sensitive data.
 
 Proceed with caution — and only if you fully understand the risks!
+
+## Simple Install instructions or Windows
+1. Click on the Releases tab on the right and download the latest version.
+2. Run the installer and the app will start.
+
 
 
 
@@ -184,14 +189,6 @@ TEST_SSH_USER=your-user
 TEST_SSH_PASS=your-password
 ```
 
-## Next Steps
-
-Follow the [Phase 1 Build Plan](docs/BUILDPLAN_PHASE1.MD) to continue development:
-1. Day 1: ✅ Complete
-2. Day 2: Define shared types and IPC channels
-3. Day 3: Set up state management
-4. Day 4: Create layout components
-5. Day 5: Configure main process and test
 
 ## License
 
